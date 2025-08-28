@@ -58,7 +58,7 @@ local networks = {
     "zetachain-cosmos-sdk-http-athens-testnet",
     "sophon-mainnet",
     "sophon-testnet",
-    "xlayer",
+    "xlayer-mainnet",
 
 
     -- staging
@@ -93,7 +93,7 @@ local networks = {
     "staging-zetachain-cosmos-sdk-http-athens-testnet",
     "staging-sophon-mainnet",
     "staging-sophon-testnet",
-    "staging-xlayer",
+    "staging-xlayer-mainnet",
 }
 
 local web3_methods = {
@@ -480,7 +480,7 @@ function _M.init()
             _M.free_list[network] = merge_methods(web3_methods, net_methods, eth_methods)
             _M.paid_list[network] = _M.free_list[network]
         elseif network == "polygon-mainnet" or network == "staging-polygon-mainnet" or
-            network == "xlayer" or network == "staging-xlayer" then
+            network == "xlayer-mainnet" or network == "staging-xlayer-mainnet" then
             _M.free_list[network] = merge_methods(web3_methods, net_methods, eth_methods, bor_methods)
             _M.paid_list[network] = merge_methods(web3_methods, net_methods, eth_methods, bor_methods, trace_methods)
         elseif network == "cfx-core" or network == "staging-cfx-core" or
