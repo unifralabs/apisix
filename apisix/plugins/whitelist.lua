@@ -59,6 +59,8 @@ local networks = {
     "sophon-mainnet",
     "sophon-testnet",
     "xlayer-mainnet",
+    "dogeos-mainnet",
+    "dogeos-testnet",
 
 
     -- staging
@@ -94,6 +96,8 @@ local networks = {
     "staging-sophon-mainnet",
     "staging-sophon-testnet",
     "staging-xlayer-mainnet",
+    "staging-dogeos-mainnet",
+    "staging-dogeos-testnet",
 }
 
 local web3_methods = {
@@ -469,6 +473,8 @@ function _M.init()
             network == "staging-scroll-alpha" or network == "scroll-alpha" or
             network == "staging-scroll-mainnet" or network == "scroll-mainnet" or
             network == "staging-scroll-testnet" or network == "scroll-testnet" or
+            network == "staging-dogeos-mainnet" or network == "dogeos-mainnet" or
+            network == "staging-dogeos-testnet" or network == "dogeos-testnet" or
             network == "staging-op-mainnet" or network == "op-mainnet" or
             network == "staging-op-testnet" or network == "op-testnet" or
             network == "staging-linea-mainnet" or network == "linea-mainnet" or
