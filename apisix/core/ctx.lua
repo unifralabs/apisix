@@ -255,6 +255,12 @@ local function parse_jsonrpc(ctx)
     end
 
     local method = request.get_method()
+
+    -- Skip JSON-RPC parsing for WebSocket handshake (GET request with Upgrade header)
+    if method == "GET" and get_var("http_upgrade", ctx._request) == "websocket" then
+        return {}  -- Return empty table for WebSocket connections
+    end
+
     local func = fetch_jsonrpc_data[method]
     if not func then
         return nil, "jsonrpc not support `" .. method .. "` request"
