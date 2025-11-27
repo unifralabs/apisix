@@ -249,41 +249,19 @@ function _M.access(conf, ctx)
     end
 
     -- Prepare connection options
+    -- NOTE: Do NOT pass headers parameter to connect() - it causes connection failures
+    -- This appears to be a bug or quirk in lua-resty-websocket library
+    -- The library will automatically set appropriate WebSocket headers
     local conn_opts = {
         timeout = 10000,
     }
 
-    -- Forward headers to upstream based on pass_host configuration
-    local headers = {}
-    local up_conf = ctx.upstream_conf
-
-    -- Handle Host header based on pass_host setting
-    local pass_host = up_conf and up_conf.pass_host or "pass"
-    if pass_host == "pass" then
-        headers["Host"] = ctx.var.http_host or ctx.var.host
-    elseif pass_host == "rewrite" and up_conf.upstream_host then
-        headers["Host"] = up_conf.upstream_host
-    else
-        headers["Host"] = server.host .. ":" .. server.port
-    end
-
-    -- Forward authentication headers if present
-    if ctx.var.http_authorization then
-        headers["Authorization"] = ctx.var.http_authorization
-    end
-
-    -- Forward Origin if present (for CORS)
-    if ctx.var.http_origin then
-        headers["Origin"] = ctx.var.http_origin
-    end
-
-    conn_opts.headers = headers
-
     -- Debug: log connection details
-    core.log.warn("ws-jsonrpc-proxy: upstream_url=", upstream_url, ", headers=", core.json.encode(headers), ", pass_host=", pass_host)
+    core.log.warn("ws-jsonrpc-proxy: upstream_url=", upstream_url)
 
     -- Apply TLS/mTLS settings for WSS connections
     if use_ssl then
+        local up_conf = ctx.upstream_conf
         if up_conf and up_conf.tls and up_conf.tls.verify ~= nil then
             conn_opts.ssl_verify = up_conf.tls.verify
         else
