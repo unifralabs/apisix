@@ -139,7 +139,11 @@ local function run_plugins_on_message(ctx, req_or_batch)
             local disabled = plugin_conf._meta and plugin_conf._meta.disable
             if not disabled then
                 local limit_cu = require("apisix.plugins.limit-cu.init")
+                -- Disable header setting for WebSocket (headers already sent with 101)
+                local orig_show_header = plugin_conf.show_limit_quota_header
+                plugin_conf.show_limit_quota_header = false
                 local status_code, body = limit_cu.rate_limit(plugin_conf, api_ctx)
+                plugin_conf.show_limit_quota_header = orig_show_header
                 if status_code then
                     return status_code, body
                 end
@@ -331,8 +335,24 @@ function _M.access(conf, ctx)
                 break
             end
 
-            local bytes, send_err = wb:send_frame(true, typ, data)
-            if not bytes then
+            -- Forward frame based on type
+            local bytes, send_err
+            if typ == "text" then
+                bytes, send_err = wb:send_text(data)
+            elseif typ == "binary" then
+                bytes, send_err = wb:send_binary(data)
+            elseif typ == "close" then
+                wb:send_close()
+                break
+            elseif typ == "ping" then
+                bytes, send_err = wb:send_pong(data)
+            elseif typ == "pong" then
+                -- Ignore pong from upstream
+            else
+                core.log.warn("ws-jsonrpc-proxy: unknown frame type from upstream: ", typ)
+            end
+
+            if send_err then
                 core.log.error("ws-jsonrpc-proxy: failed to send frame to client: ", send_err)
                 break
             end
