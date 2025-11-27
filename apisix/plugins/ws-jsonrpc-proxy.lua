@@ -11,6 +11,7 @@
 
 local core = require("apisix.core")
 local balancer = require("apisix.balancer")
+local upstream_mod = require("apisix.upstream")
 local ngx = ngx
 local ipairs = ipairs
 local type = type
@@ -175,9 +176,18 @@ function _M.access(conf, ctx)
 
     core.log.info("ws-jsonrpc-proxy: intercepting WebSocket connection for ", ctx.var.host)
 
+    -- Initialize upstream configuration (normally done after access phase)
+    -- This is needed because we're picking the server during access phase
+    local route = ctx.matched_route
+    local code, err = upstream_mod.set_by_route(route, ctx)
+    if code then
+        core.log.error("ws-jsonrpc-proxy: failed to set upstream: ", err)
+        return code
+    end
+
     -- Pick upstream server using APISIX's balancer
     -- This ensures we use the same load balancing, health checks, and retry logic as HTTP
-    local server, err = balancer.pick_server(ctx.matched_route, ctx)
+    local server, err = balancer.pick_server(route, ctx)
     if not server then
         core.log.error("ws-jsonrpc-proxy: failed to pick server: ", err)
         return 502
