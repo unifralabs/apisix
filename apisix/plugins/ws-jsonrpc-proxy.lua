@@ -176,9 +176,30 @@ function _M.access(conf, ctx)
 
     core.log.info("ws-jsonrpc-proxy: intercepting WebSocket connection for ", ctx.var.host)
 
-    -- Initialize upstream configuration (normally done after access phase)
+    -- Initialize upstream configuration (normally done in handle_upstream after access phase)
     -- This is needed because we're picking the server during access phase
     local route = ctx.matched_route
+    local route_val = route.value
+
+    -- Load upstream by upstream_id if specified
+    local up_id = route_val.upstream_id
+    if up_id then
+        local upstream = upstream_mod.get_by_id(up_id)
+        if not upstream then
+            core.log.error("ws-jsonrpc-proxy: upstream not found: ", up_id)
+            return 502
+        end
+        ctx.matched_upstream = upstream
+    else
+        -- Use upstream from route directly
+        ctx.matched_upstream = route_val.upstream
+    end
+
+    if not ctx.matched_upstream then
+        core.log.error("ws-jsonrpc-proxy: no upstream configured")
+        return 502
+    end
+
     local code, err = upstream_mod.set_by_route(route, ctx)
     if code then
         core.log.error("ws-jsonrpc-proxy: failed to set upstream: ", err)
