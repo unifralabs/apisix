@@ -221,16 +221,18 @@ function _M.access(conf, ctx)
     local ws_client = require("resty.websocket.client")
     local cjson = require("cjson.safe")
 
-    -- Establish server-side WebSocket connection (accept client connection)
+    -- Accept client WebSocket connection first (completes 101 handshake)
     local wb, err = ws_server:new({
-        timeout = 60000,  -- 60 seconds
-        max_payload_len = 65535,
+        timeout = 60000,  -- 60 second timeout for client
+        max_payload_len = 65535
     })
 
     if not wb then
         core.log.error("ws-jsonrpc-proxy: failed to create WebSocket server: ", err)
         return 500
     end
+
+    core.log.info("ws-jsonrpc-proxy: accepted client WebSocket connection")
 
     -- Build upstream WebSocket URI with proper path and query string
     local upstream_scheme = ctx.upstream_scheme
@@ -248,7 +250,8 @@ function _M.access(conf, ctx)
 
     -- Build full upstream WebSocket URL
     local upstream_url = ws_scheme .. "://" .. server.host .. ":" .. server.port .. upstream_uri
-    core.log.info("ws-jsonrpc-proxy: connecting to upstream ", upstream_url)
+    core.log.warn("ws-jsonrpc-proxy: connecting to upstream ", upstream_url)
+    core.log.warn("ws-jsonrpc-proxy: upstream_uri=", upstream_uri, ", scheme=", upstream_scheme)
 
     -- Connect to upstream WebSocket server
     local wc = ws_client:new()
@@ -258,39 +261,27 @@ function _M.access(conf, ctx)
         timeout = 10000,
     }
 
-    -- Forward all client request headers to upstream
-    -- Skip WebSocket handshake headers that will be handled by lua-resty-websocket
-    local skip_headers = {
-        ["connection"] = true,
-        ["upgrade"] = true,
-        ["sec-websocket-key"] = true,
-        ["sec-websocket-version"] = true,
-        ["sec-websocket-extensions"] = true,
-    }
-
+    -- Only forward necessary headers to upstream
+    -- lua-resty-websocket handles the WebSocket handshake headers automatically
     local headers = {}
-    local req_headers = ngx.req.get_headers(0)  -- 0 = no limit
-    for k, v in pairs(req_headers) do
-        local lower_k = k:lower()
-        if not skip_headers[lower_k] then
-            headers[k] = v
-        end
+
+    -- Set Host header for upstream (use server host:port for internal routing)
+    headers["Host"] = server.host .. ":" .. server.port
+
+    -- Forward authentication headers if present
+    if ctx.var.http_authorization then
+        headers["Authorization"] = ctx.var.http_authorization
     end
 
-    -- Override Host header if upstream_host is set (by proxy-rewrite or upstream config)
-    local upstream_host = ctx.var.upstream_host
-    if upstream_host then
-        headers["Host"] = upstream_host
-    end
-
-    -- Forward any custom headers set by proxy-rewrite plugin
-    if ctx.upstream_headers then
-        for k, v in pairs(ctx.upstream_headers) do
-            headers[k] = v
-        end
+    -- Forward Origin if present (for CORS)
+    if ctx.var.http_origin then
+        headers["Origin"] = ctx.var.http_origin
     end
 
     conn_opts.headers = headers
+
+    -- Debug: log connection details
+    core.log.warn("ws-jsonrpc-proxy: upstream_url=", upstream_url, ", headers=", core.json.encode(headers))
 
     -- Apply TLS/mTLS settings from upstream configuration
     -- This ensures WSS connections respect the same TLS settings as HTTPS
@@ -347,8 +338,10 @@ function _M.access(conf, ctx)
 
     if not ok then
         core.log.error("ws-jsonrpc-proxy: failed to connect to upstream WebSocket: ", err)
-        wb:send_close()
-        return 502
+        -- Cannot return HTTP status code after WebSocket handshake is complete (101 already sent)
+        -- Just close the client WebSocket connection
+        wb:send_close(1014, "upstream connection failed")
+        return ngx.exit(ngx.OK)  -- Exit without error since we've handled the closure
     end
 
     core.log.info("ws-jsonrpc-proxy: connected to upstream")
