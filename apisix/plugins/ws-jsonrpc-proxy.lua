@@ -221,19 +221,6 @@ function _M.access(conf, ctx)
     local ws_client = require("resty.websocket.client")
     local cjson = require("cjson.safe")
 
-    -- Accept client WebSocket connection first (completes 101 handshake)
-    local wb, err = ws_server:new({
-        timeout = 60000,  -- 60 second timeout for client
-        max_payload_len = 65535
-    })
-
-    if not wb then
-        core.log.error("ws-jsonrpc-proxy: failed to create WebSocket server: ", err)
-        return 500
-    end
-
-    core.log.info("ws-jsonrpc-proxy: accepted client WebSocket connection")
-
     -- Build upstream WebSocket URI with proper path and query string
     local upstream_scheme = ctx.upstream_scheme
     local ws_scheme = "ws"
@@ -244,29 +231,41 @@ function _M.access(conf, ctx)
     end
 
     -- Use the rewritten URI from proxy-rewrite plugin if available
-    -- IMPORTANT: ctx.var.upstream_uri may already contain query string when ctx.var.is_args == "?"
-    -- (see apisix/plugins/proxy-rewrite.lua:291-296), so we should NOT blindly append args again
     local upstream_uri = ctx.var.upstream_uri or ctx.var.uri
 
     -- Build full upstream WebSocket URL
     local upstream_url = ws_scheme .. "://" .. server.host .. ":" .. server.port .. upstream_uri
     core.log.warn("ws-jsonrpc-proxy: connecting to upstream ", upstream_url)
-    core.log.warn("ws-jsonrpc-proxy: upstream_uri=", upstream_uri, ", scheme=", upstream_scheme)
 
-    -- Connect to upstream WebSocket server
-    local wc = ws_client:new()
+    -- Create upstream WebSocket client
+    local wc, wc_err = ws_client:new({
+        timeout = 10000,
+        max_payload_len = 65535
+    })
+
+    if not wc then
+        core.log.error("ws-jsonrpc-proxy: failed to create WebSocket client: ", wc_err)
+        return 502
+    end
 
     -- Prepare connection options
     local conn_opts = {
         timeout = 10000,
     }
 
-    -- Only forward necessary headers to upstream
-    -- lua-resty-websocket handles the WebSocket handshake headers automatically
+    -- Forward headers to upstream based on pass_host configuration
     local headers = {}
+    local up_conf = ctx.upstream_conf
 
-    -- Set Host header for upstream (use server host:port for internal routing)
-    headers["Host"] = server.host .. ":" .. server.port
+    -- Handle Host header based on pass_host setting
+    local pass_host = up_conf and up_conf.pass_host or "pass"
+    if pass_host == "pass" then
+        headers["Host"] = ctx.var.http_host or ctx.var.host
+    elseif pass_host == "rewrite" and up_conf.upstream_host then
+        headers["Host"] = up_conf.upstream_host
+    else
+        headers["Host"] = server.host .. ":" .. server.port
+    end
 
     -- Forward authentication headers if present
     if ctx.var.http_authorization then
@@ -281,25 +280,16 @@ function _M.access(conf, ctx)
     conn_opts.headers = headers
 
     -- Debug: log connection details
-    core.log.warn("ws-jsonrpc-proxy: upstream_url=", upstream_url, ", headers=", core.json.encode(headers))
+    core.log.warn("ws-jsonrpc-proxy: upstream_url=", upstream_url, ", headers=", core.json.encode(headers), ", pass_host=", pass_host)
 
-    -- Apply TLS/mTLS settings from upstream configuration
-    -- This ensures WSS connections respect the same TLS settings as HTTPS
+    -- Apply TLS/mTLS settings for WSS connections
     if use_ssl then
-        local up_conf = ctx.upstream_conf
-
-        -- SSL verification setting
-        -- IMPORTANT: Match APISIX's default behavior - Nginx's proxy_ssl_verify defaults to OFF
-        -- We only enable verification when explicitly configured in upstream.tls.verify
         if up_conf and up_conf.tls and up_conf.tls.verify ~= nil then
             conn_opts.ssl_verify = up_conf.tls.verify
         else
-            -- Default to false to match Nginx/APISIX default behavior
-            -- This ensures existing HTTPS upstreams with self-signed or private CA certs keep working
             conn_opts.ssl_verify = false
         end
 
-        -- Client certificate for mTLS
         if up_conf and up_conf.tls then
             if up_conf.tls.client_cert and up_conf.tls.client_key then
                 conn_opts.client_cert = up_conf.tls.client_cert
@@ -307,7 +297,6 @@ function _M.access(conf, ctx)
             end
         end
 
-        -- Check for client_cert_id (SSL reference)
         if ctx.upstream_ssl then
             local ssl = ctx.upstream_ssl
             if ssl.value then
@@ -320,31 +309,38 @@ function _M.access(conf, ctx)
             end
         end
 
-        -- Set SNI (Server Name Indication) for TLS handshake
-        -- Use upstream_host if available, otherwise use the server domain/host
-        local sni = upstream_host or server.domain or server.host
+        local sni = server.domain or server.host
         if sni then
-            -- Remove port from SNI if present
             sni = sni:match("^([^:]+)")
             conn_opts.server_name = sni
         end
-
-        core.log.info("ws-jsonrpc-proxy: TLS settings - ssl_verify: ", conn_opts.ssl_verify,
-                      ", sni: ", conn_opts.server_name or "nil",
-                      ", has_client_cert: ", conn_opts.client_cert ~= nil)
     end
 
+    -- IMPORTANT: Connect to upstream FIRST, before accepting client connection
+    -- This is because ws_server:new() hijacks the HTTP request and changes nginx state
     local ok, err = wc:connect(upstream_url, conn_opts)
 
     if not ok then
         core.log.error("ws-jsonrpc-proxy: failed to connect to upstream WebSocket: ", err)
-        -- Cannot return HTTP status code after WebSocket handshake is complete (101 already sent)
-        -- Just close the client WebSocket connection
-        wb:send_close(1014, "upstream connection failed")
-        return ngx.exit(ngx.OK)  -- Exit without error since we've handled the closure
+        -- Return 502 since we haven't sent 101 to client yet
+        return 502
     end
 
-    core.log.info("ws-jsonrpc-proxy: connected to upstream")
+    core.log.info("ws-jsonrpc-proxy: connected to upstream, now accepting client connection")
+
+    -- NOW accept client WebSocket connection (sends 101 response to client)
+    local wb, wb_err = ws_server:new({
+        timeout = 60000,
+        max_payload_len = 65535
+    })
+
+    if not wb then
+        core.log.error("ws-jsonrpc-proxy: failed to create WebSocket server: ", wb_err)
+        wc:send_close()
+        return 500
+    end
+
+    core.log.info("ws-jsonrpc-proxy: client WebSocket connection established")
 
     -- Spawn a thread to forward downstream messages (upstream -> client)
     local downstream_thread = ngx.thread.spawn(function()
