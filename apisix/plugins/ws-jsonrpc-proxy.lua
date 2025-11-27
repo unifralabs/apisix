@@ -23,8 +23,8 @@ local schema = {
 }
 
 local _M = {
-    version = 0.5,
-    priority = 1005,  -- Run after limit-conn (1003) but with other limit plugins
+    version = 0.1,
+    priority = 1004,  -- Run after proxy-rewrite (1008), before limit-conn (1003)
     name = plugin_name,
     schema = schema,
 }
