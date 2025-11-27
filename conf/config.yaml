@@ -464,6 +464,7 @@ plugins:      # plugin list (sorted by priority)
   - proxy-cache                    # priority: 1009
   - proxy-rewrite                  # priority: 1008
   - workflow                       # priority: 1006
+  - ws-jsonrpc-proxy               # priority: 1005
   - api-breaker                    # priority: 1005
   - calculate-cu                   # priority: 1012
   - limit-monthly-cu               # priority: 1011
