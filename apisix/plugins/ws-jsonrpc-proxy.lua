@@ -25,7 +25,7 @@ local schema = {
 
 local _M = {
     version = 0.1,
-    priority = 1004,  -- Run after proxy-rewrite (1008), before limit-conn (1003)
+    priority = 999,   -- Run after limit-conn (1003) and limit-count (1002), before gzip/server-info
     name = plugin_name,
     schema = schema,
 }
@@ -229,6 +229,16 @@ function _M.access(conf, ctx)
     local ws_client = require("resty.websocket.client")
     local cjson = require("cjson.safe")
 
+    -- Derive WS timeouts from upstream config (seconds -> ms); fallback 60s
+    local ws_timeout = 60000
+    local up_conf = ctx.upstream_conf
+    if up_conf and up_conf.timeout then
+        local read_t = up_conf.timeout.read
+        if read_t then
+            ws_timeout = read_t * 1000
+        end
+    end
+
     -- Build upstream WebSocket URI with proper path and query string
     local upstream_scheme = ctx.upstream_scheme
     local ws_scheme = "ws"
@@ -247,7 +257,7 @@ function _M.access(conf, ctx)
 
     -- Create upstream WebSocket client
     local wc, wc_err = ws_client:new({
-        timeout = 10000,
+        timeout = ws_timeout,
         max_payload_len = 65535
     })
 
@@ -261,7 +271,7 @@ function _M.access(conf, ctx)
     -- This appears to be a bug or quirk in lua-resty-websocket library
     -- The library will automatically set appropriate WebSocket headers
     local conn_opts = {
-        timeout = 10000,
+        timeout = ws_timeout,
     }
 
     -- Debug: log connection details
@@ -316,7 +326,7 @@ function _M.access(conf, ctx)
 
     -- NOW accept client WebSocket connection (sends 101 response to client)
     local wb, wb_err = ws_server:new({
-        timeout = 60000,
+        timeout = ws_timeout,
         max_payload_len = 65535
     })
 
@@ -333,9 +343,11 @@ function _M.access(conf, ctx)
         while true do
             local data, typ, err = wc:recv_frame()
             if not data then
-                if err ~= "timeout" then
-                    core.log.info("ws-jsonrpc-proxy: upstream WebSocket closed: ", err or "unknown")
+                if err == "timeout" then
+                    -- keep the tunnel alive on idle upstream
+                    goto continue
                 end
+                core.log.info("ws-jsonrpc-proxy: upstream WebSocket closed: ", err or "unknown")
                 break
             end
 
@@ -360,6 +372,8 @@ function _M.access(conf, ctx)
                 core.log.error("ws-jsonrpc-proxy: failed to send frame to client: ", send_err)
                 break
             end
+
+            ::continue::
         end
         -- Close client connection when upstream closes
         wb:send_close()
@@ -370,9 +384,11 @@ function _M.access(conf, ctx)
         local data, typ, err = wb:recv_frame()
 
         if not data then
-            if err ~= "timeout" then
-                core.log.info("ws-jsonrpc-proxy: client WebSocket closed: ", err or "unknown")
+            if err == "timeout" then
+                -- keep waiting on idle client
+                goto continue_loop
             end
+            core.log.info("ws-jsonrpc-proxy: client WebSocket closed: ", err or "unknown")
             break
         end
 
