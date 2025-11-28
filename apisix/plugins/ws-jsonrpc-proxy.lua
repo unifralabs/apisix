@@ -137,6 +137,9 @@ local function run_plugins_on_message(ctx, req_or_batch)
         local plugin_conf = plugins[i + 1]
         if plugin_obj.name == "limit-cu" then
             local disabled = plugin_conf._meta and plugin_conf._meta.disable
+            core.log.info("ws-jsonrpc-proxy: limit-cu found, disabled=", disabled,
+                         ", count=", plugin_conf.count,
+                         ", seconds_quota=", api_ctx.var.seconds_quota)
             if not disabled then
                 local limit_cu = require("apisix.plugins.limit-cu.init")
                 -- Disable header setting for WebSocket (headers already sent with 101)
@@ -144,6 +147,7 @@ local function run_plugins_on_message(ctx, req_or_batch)
                 plugin_conf.show_limit_quota_header = false
                 local status_code, body = limit_cu.rate_limit(plugin_conf, api_ctx)
                 plugin_conf.show_limit_quota_header = orig_show_header
+                core.log.info("ws-jsonrpc-proxy: limit-cu result, status_code=", status_code)
                 if status_code then
                     return status_code, body
                 end
