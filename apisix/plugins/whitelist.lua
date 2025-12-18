@@ -61,6 +61,7 @@ local networks = {
     "xlayer-mainnet",
     "dogeos-mainnet",
     "dogeos-testnet",
+    "bsc-mainnet",
 
 
     -- staging
@@ -98,6 +99,7 @@ local networks = {
     "staging-xlayer-mainnet",
     "staging-dogeos-mainnet",
     "staging-dogeos-testnet",
+    "staging-bsc-mainnet",
 }
 
 local web3_methods = {
@@ -412,6 +414,24 @@ local zks_methods = {
     "zks_L1ChainId"
 }
 
+local bsc_methods_free = {
+    "eth_getHeaderByNumber",
+    "eth_getHeaderByHash"
+    "eth_newFinalizedHeaderFilter"
+    "eth_getFinalizedHeader"
+    "eth_getFinalizedBlock"
+    "eth_getTransactionsByBlockNumber"
+    "eth_getTransactionDataAndReceipt"
+    "eth_getBlobSidecars"
+    "eth_getBlobSidecarByTxHash"
+}
+
+local bsc_methods_paid = {
+    "parlia_getValidators"
+    "parlia_getSnapshot"
+}
+
+
 local function merge_methods(...)
     local methods = {}
     for _, method_list in ipairs({ ... }) do
@@ -500,6 +520,9 @@ function _M.init()
             network == "starknet-testnet" or network == "staging-starknet-testnet" then
             _M.free_list[network] = merge_methods(starknet_methods)
             _M.paid_list[network] = _M.free_list[network]
+        elseif network == "bsc-mainnet" or network == "staging-bsc-mainnet" then
+            _M.free_list[network] = merge_methods(web3_methods, net_methods, eth_methods, bsc_methods_free)
+            _M.paid_list[network] = merge_methods(web3_methods, net_methods, eth_methods, bsc_methods_free, trace_methods, debug_methods, bsc_methods_paid)
         elseif string.find(network, "zetachain") then
             -- TODO: passed now, but need to limit access to some methods
             -- ! dont' access free_list and paid_list in this case
