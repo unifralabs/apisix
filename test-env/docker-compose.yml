@@ -27,8 +27,8 @@ services:
       - etcd
       - redis
     volumes:
-      # Mount Unifra plugins
-      - ../unifra-apisix:/opt/unifra-apisix:ro
+      # Mount Unifra plugins (repo root is the plugin directory)
+      - ..:/opt/unifra-apisix:ro
       # Mount custom config
       - ./apisix-config.yaml:/usr/local/apisix/conf/config.yaml:ro
     ports:
