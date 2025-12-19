@@ -1,0 +1,57 @@
+#
+# APISIX Configuration for Testing Unifra Plugins
+#
+
+apisix:
+  node_listen: 9080
+  enable_ipv6: false
+  enable_admin: true
+  admin_key:
+    - name: admin
+      key: unifra-test-admin-key
+      role: admin
+
+  # CRITICAL: Load Unifra plugins from external directory
+  extra_lua_path: "/opt/unifra-apisix/?.lua"
+
+# Enable Unifra custom plugins
+plugins:
+  # Unifra plugins (listed by priority, highest first)
+  - unifra-jsonrpc-var      # 26000 - Parse JSON-RPC
+  - unifra-guard            # 25000 - Emergency blocker
+  - unifra-ctx-var          # 24000 - Consumer variables
+  - unifra-whitelist        # 1900  - Access control
+  - unifra-calculate-cu     # 1012  - CU calculation
+  - unifra-limit-monthly-cu # 1011  - Monthly quota
+  - unifra-limit-cu         # 1010  - Rate limiting
+  - unifra-ws-jsonrpc-proxy # 999   - WebSocket
+
+  # APISIX native plugins
+  - proxy-rewrite
+  - key-auth
+  - limit-conn
+  - limit-count
+  - prometheus
+  - http-logger
+
+# etcd configuration
+deployment:
+  role: traditional
+  role_traditional:
+    config_provider: etcd
+  etcd:
+    host:
+      - "http://etcd:2379"
+    prefix: "/apisix"
+    timeout: 30
+  admin:
+    admin_key:
+      - name: admin
+        key: unifra-test-admin-key
+        role: admin
+    allow_admin:
+      - 0.0.0.0/0  # Allow all IPs (for testing only!)
+
+# Logging
+nginx_config:
+  error_log_level: info

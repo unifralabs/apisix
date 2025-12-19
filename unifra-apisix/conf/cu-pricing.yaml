@@ -1,0 +1,187 @@
+# Unifra Compute Unit (CU) Pricing Configuration
+#
+# This file defines the CU cost for each JSON-RPC method.
+# CU is used for rate limiting and billing purposes.
+#
+# Default cost is applied to methods not listed here.
+# Wildcard patterns are supported (e.g., "debug_*")
+
+# Default CU cost for unlisted methods
+default: 1
+
+# Method-specific CU costs
+methods:
+  # ================================
+  # Basic/Simple Methods (1 CU)
+  # ================================
+  # These are simple lookups with minimal computation
+  web3_clientVersion: 1
+  web3_sha3: 1
+  net_version: 1
+  net_listening: 1
+  eth_chainId: 1
+  eth_blockNumber: 1
+  eth_protocolVersion: 1
+  eth_syncing: 1
+  eth_gasPrice: 1
+  eth_maxPriorityFeePerGas: 1
+
+  # ================================
+  # Standard Methods (2 CU)
+  # ================================
+  # These require moderate computation or state lookup
+  eth_getBalance: 2
+  eth_getStorageAt: 2
+  eth_getCode: 2
+  eth_getTransactionCount: 2
+  eth_getBlockTransactionCountByHash: 2
+  eth_getBlockTransactionCountByNumber: 2
+  eth_getUncleCountByBlockHash: 2
+  eth_getUncleCountByBlockNumber: 2
+
+  # ================================
+  # Block/Transaction Retrieval (3 CU)
+  # ================================
+  eth_getBlockByHash: 3
+  eth_getBlockByNumber: 3
+  eth_getTransactionByHash: 3
+  eth_getTransactionByBlockHashAndIndex: 3
+  eth_getTransactionByBlockNumberAndIndex: 3
+  eth_getTransactionReceipt: 3
+  eth_getUncleByBlockHashAndIndex: 3
+  eth_getUncleByBlockNumberAndIndex: 3
+  eth_feeHistory: 3
+
+  # ================================
+  # Execution Methods (5 CU)
+  # ================================
+  # These require EVM execution
+  eth_call: 5
+  eth_estimateGas: 5
+  eth_getProof: 5
+  eth_sendRawTransaction: 5
+  eth_sendPrivateTransaction: 5
+  eth_cancelPrivateTransaction: 5
+
+  # ================================
+  # Heavy Methods (10 CU)
+  # ================================
+  # These are computationally expensive
+  eth_getLogs: 10
+  eth_getBlockReceipts: 10
+
+  # ================================
+  # Filter Methods (2 CU)
+  # ================================
+  eth_newFilter: 2
+  eth_newBlockFilter: 2
+  eth_newPendingTransactionFilter: 2
+  eth_getFilterChanges: 2
+  eth_getFilterLogs: 5
+  eth_uninstallFilter: 1
+
+  # ================================
+  # Debug Methods (20 CU)
+  # ================================
+  # These are very expensive debugging operations
+  debug_*: 20
+  debug_traceTransaction: 30
+  debug_traceBlockByHash: 50
+  debug_traceBlockByNumber: 50
+  debug_traceCall: 30
+
+  # ================================
+  # Trace Methods (20 CU)
+  # ================================
+  trace_*: 20
+  trace_block: 50
+  trace_transaction: 25
+  trace_call: 25
+  trace_callMany: 30
+  trace_rawTransaction: 25
+  trace_replayBlockTransactions: 50
+  trace_replayTransaction: 25
+
+  # ================================
+  # ZkSync Era Methods
+  # ================================
+  zks_estimateFee: 3
+  zks_estimateGasL1ToL2: 3
+  zks_getAllAccountBalances: 2
+  zks_getBlockDetails: 3
+  zks_getBridgeContracts: 1
+  zks_getBytecodeByHash: 2
+  zks_getConfirmedTokens: 2
+  zks_getL1BatchBlockRange: 2
+  zks_getL1BatchDetails: 3
+  zks_getL2ToL1LogProof: 3
+  zks_getMainContract: 1
+  zks_getRawBlockTransactions: 5
+  zks_getTestnetPaymaster: 1
+  zks_getTokenPrice: 1
+  zks_getTransactionDetails: 3
+  zks_L1BatchNumber: 1
+  zks_L1ChainId: 1
+
+  # ================================
+  # Polygon Bor Methods
+  # ================================
+  bor_getSnapshot: 3
+  bor_getAuthor: 2
+  bor_getSnapshotAtHash: 3
+  bor_getSigners: 2
+  bor_getSignersAtHash: 2
+  bor_getCurrentProposer: 1
+  bor_getCurrentValidators: 2
+  bor_getRootHash: 3
+
+  # ================================
+  # Conflux Core Methods
+  # ================================
+  cfx_getStatus: 1
+  cfx_epochNumber: 1
+  cfx_gasPrice: 1
+  cfx_maxPriorityFeePerGas: 1
+  cfx_getBalance: 2
+  cfx_getCode: 2
+  cfx_call: 5
+  cfx_estimateGasAndCollateral: 5
+  cfx_getLogs: 10
+  cfx_getTransactionByHash: 3
+  cfx_getTransactionReceipt: 3
+  cfx_getBlockByHash: 3
+  cfx_getBlockByEpochNumber: 3
+  cfx_sendRawTransaction: 5
+  cfx_getEpochReceipts: 20
+
+  # ================================
+  # Starknet Methods
+  # ================================
+  starknet_blockNumber: 1
+  starknet_chainId: 1
+  starknet_syncing: 1
+  starknet_getNonce: 2
+  starknet_getStorageAt: 2
+  starknet_getBlockWithTxHashes: 3
+  starknet_getBlockWithTxs: 5
+  starknet_getTransactionByHash: 3
+  starknet_getTransactionReceipt: 3
+  starknet_call: 5
+  starknet_estimateFee: 5
+  starknet_getEvents: 10
+
+  # ================================
+  # CKB (Nervos) Methods
+  # ================================
+  get_tip_header: 1
+  get_tip_block_number: 1
+  get_current_epoch: 1
+  get_block: 3
+  get_header: 2
+  get_transaction: 3
+  get_cells: 5
+  get_transactions: 5
+  get_cells_capacity: 3
+  send_transaction: 5
+  dry_run_transaction: 5
+  estimate_cycles: 5

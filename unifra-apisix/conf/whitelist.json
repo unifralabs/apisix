@@ -1,0 +1,44 @@
+{
+  "networks": {
+    "eth-mainnet": {
+      "free": [
+        "web3_clientVersion",
+        "web3_sha3",
+        "net_version",
+        "net_listening",
+        "eth_blockNumber",
+        "eth_chainId",
+        "eth_gasPrice",
+        "eth_maxPriorityFeePerGas",
+        "eth_feeHistory",
+        "eth_getBalance",
+        "eth_getStorageAt",
+        "eth_getCode",
+        "eth_getProof",
+        "eth_call",
+        "eth_estimateGas",
+        "eth_getBlockByHash",
+        "eth_getBlockByNumber",
+        "eth_getBlockReceipts",
+        "eth_getTransactionByHash",
+        "eth_getTransactionByBlockHashAndIndex",
+        "eth_getTransactionByBlockNumberAndIndex",
+        "eth_getTransactionCount",
+        "eth_getTransactionReceipt",
+        "eth_getBlockTransactionCountByHash",
+        "eth_getBlockTransactionCountByNumber",
+        "eth_getUncleByBlockHashAndIndex",
+        "eth_getUncleByBlockNumberAndIndex",
+        "eth_getUncleCountByBlockHash",
+        "eth_getUncleCountByBlockNumber",
+        "eth_getLogs",
+        "eth_sendRawTransaction"
+      ],
+      "paid": [
+        "debug_*",
+        "trace_*",
+        "eth_createAccessList"
+      ]
+    }
+  }
+}

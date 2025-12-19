@@ -1,0 +1,84 @@
+# APISIX Configuration Example for Unifra JSON-RPC Gateway
+#
+# This file shows how to configure APISIX to use Unifra plugins
+# Copy relevant sections to your conf/config.yaml
+#
+
+apisix:
+  # CRITICAL: Add this line to load Unifra modules
+  # Adjust path based on your deployment
+  extra_lua_path: "/opt/unifra-apisix/?.lua"
+
+  node_listen: 9080
+  enable_ipv6: false
+  enable_admin: true
+  admin_key:
+    - name: admin
+      key: YOUR_ADMIN_KEY_HERE
+      role: admin
+
+# Plugin configuration
+plugins:
+  # ================================
+  # Unifra Custom Plugins
+  # ================================
+  # IMPORTANT: Order matters - plugins run by priority (higher = earlier)
+  - unifra-jsonrpc-var      # Priority: 26000 - Parse JSON-RPC, inject variables
+  - unifra-guard            # Priority: 25000 - Emergency circuit breaker
+  - unifra-ctx-var          # Priority: 24000 - Inject consumer variables (quota, etc.)
+  - unifra-whitelist        # Priority: 1900  - Method access control
+  - unifra-calculate-cu     # Priority: 1012  - Calculate compute units
+  - unifra-limit-monthly-cu # Priority: 1011  - Monthly quota check
+  - unifra-limit-cu         # Priority: 1010  - Per-second rate limiting
+  - unifra-ws-jsonrpc-proxy # Priority: 999   - WebSocket JSON-RPC proxy
+
+  # ================================
+  # APISIX Native Plugins (examples)
+  # ================================
+  # Authentication
+  - key-auth               # Priority: 2500
+  - jwt-auth               # Priority: 2510
+  - basic-auth             # Priority: 2520
+
+  # Rate Limiting (can be used alongside Unifra plugins)
+  - limit-conn             # Priority: 1003
+  - limit-count            # Priority: 1002
+  - limit-req              # Priority: 1001
+
+  # Traffic Control
+  - proxy-rewrite          # Priority: 1008
+  - response-rewrite       # Priority: 899
+
+  # Observability
+  - prometheus             # Priority: 500
+  - http-logger            # Priority: 410
+
+  # Other
+  - cors
+  - gzip
+
+# etcd configuration
+deployment:
+  role: traditional
+  role_traditional:
+    config_provider: etcd
+  etcd:
+    host:
+      - "http://127.0.0.1:2379"
+    prefix: "/apisix"
+    timeout: 30
+
+# Logging
+nginx_config:
+  error_log_level: warn
+  http:
+    enable_access_log: true
+    access_log: logs/access.log
+    access_log_format: '{"time": "$time_iso8601", "remote_addr": "$remote_addr", "request": "$request", "status": $status, "body_bytes_sent": $body_bytes_sent, "request_time": $request_time, "upstream_response_time": "$upstream_response_time"}'
+
+# Plugin attributes (global defaults for plugins)
+plugin_attr:
+  prometheus:
+    export_addr:
+      ip: "0.0.0.0"
+      port: 9091

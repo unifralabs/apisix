@@ -1,0 +1,551 @@
+# Unifra JSON-RPC Method Whitelist Configuration
+#
+# This file defines which JSON-RPC methods are available for each network.
+# - free: Methods available to all users
+# - paid: Methods only available to paid tier users
+#
+# Wildcard patterns are supported (e.g., "eth_*" matches all eth_ prefixed methods)
+
+networks:
+  # =====================
+  # Ethereum Networks
+  # =====================
+  eth-mainnet:
+    free:
+      # Web3 methods
+      - web3_clientVersion
+      - web3_sha3
+      # Net methods
+      - net_version
+      - net_listening
+      # Eth methods
+      - eth_blockNumber
+      - eth_chainId
+      - eth_gasPrice
+      - eth_maxPriorityFeePerGas
+      - eth_feeHistory
+      - eth_getBalance
+      - eth_getStorageAt
+      - eth_getCode
+      - eth_getProof
+      - eth_call
+      - eth_estimateGas
+      - eth_getBlockByHash
+      - eth_getBlockByNumber
+      - eth_getBlockReceipts
+      - eth_getTransactionByHash
+      - eth_getTransactionByBlockHashAndIndex
+      - eth_getTransactionByBlockNumberAndIndex
+      - eth_getTransactionCount
+      - eth_getTransactionReceipt
+      - eth_getBlockTransactionCountByHash
+      - eth_getBlockTransactionCountByNumber
+      - eth_getUncleByBlockHashAndIndex
+      - eth_getUncleByBlockNumberAndIndex
+      - eth_getUncleCountByBlockHash
+      - eth_getUncleCountByBlockNumber
+      - eth_getLogs
+      - eth_sendRawTransaction
+      - eth_sendPrivateTransaction
+      - eth_cancelPrivateTransaction
+      - eth_protocolVersion
+      # Filter methods
+      - eth_newFilter
+      - eth_newBlockFilter
+      - eth_newPendingTransactionFilter
+      - eth_getFilterChanges
+      - eth_getFilterLogs
+      - eth_uninstallFilter
+    paid:
+      - trace_*
+      - debug_*
+
+  eth-sepolia:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+    paid:
+      - trace_*
+      - debug_*
+
+  # =====================
+  # Polygon Networks
+  # =====================
+  polygon-mainnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+      - bor_getSnapshot
+      - bor_getAuthor
+      - bor_getSnapshotAtHash
+      - bor_getSigners
+      - bor_getSignersAtHash
+      - bor_getCurrentProposer
+      - bor_getCurrentValidators
+      - bor_getRootHash
+    paid:
+      - trace_*
+      - debug_*
+
+  # =====================
+  # Layer 2 Networks
+  # =====================
+  arb-mainnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+    paid:
+      - debug_*
+
+  opt-mainnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+    paid:
+      - debug_*
+
+  base-mainnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+    paid:
+      - debug_*
+
+  base-testnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+    paid:
+      - debug_*
+
+  scroll-mainnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+    paid:
+      - debug_*
+
+  scroll-testnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+    paid:
+      - debug_*
+
+  linea-mainnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+    paid:
+      - debug_*
+
+  linea-testnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+    paid:
+      - debug_*
+
+  # =====================
+  # ZK Networks
+  # =====================
+  zksync-era-mainnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+      - zks_estimateFee
+      - zks_estimateGasL1ToL2
+      - zks_getAllAccountBalances
+      - zks_getBlockDetails
+      - zks_getBridgeContracts
+      - zks_getBytecodeByHash
+      - zks_getConfirmedTokens
+      - zks_getL1BatchBlockRange
+      - zks_getL1BatchDetails
+      - zks_getL2ToL1LogProof
+      - zks_getMainContract
+      - zks_getRawBlockTransactions
+      - zks_getTestnetPaymaster
+      - zks_getTokenPrice
+      - zks_getTransactionDetails
+      - zks_L1BatchNumber
+      - zks_L1ChainId
+    paid:
+      - debug_*
+
+  zksync-era-testnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+      - zks_*
+    paid:
+      - debug_*
+
+  # =====================
+  # Conflux Networks
+  # =====================
+  cfx-espace:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+    paid:
+      - trace_*
+
+  cfx-espace-testnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+    paid:
+      - trace_*
+
+  cfx-core:
+    free:
+      - cfx_getStatus
+      - cfx_epochNumber
+      - cfx_gasPrice
+      - cfx_maxPriorityFeePerGas
+      - cfx_getBalance
+      - cfx_getAdmin
+      - cfx_getSponsorInfo
+      - cfx_getStakingBalance
+      - cfx_getDepositList
+      - cfx_getVoteList
+      - cfx_getCollateralForStorage
+      - cfx_getCode
+      - cfx_getStorageAt
+      - cfx_getStorageRoot
+      - cfx_getBlockByHash
+      - cfx_getBlockByHashWithPivotAssumption
+      - cfx_getBlockByEpochNumber
+      - cfx_getBlockByBlockNumber
+      - cfx_getBestBlockHash
+      - cfx_getNextNonce
+      - cfx_sendRawTransaction
+      - cfx_call
+      - cfx_estimateGasAndCollateral
+      - cfx_getLogs
+      - cfx_getTransactionByHash
+      - cfx_getTransactionReceipt
+      - cfx_getAccount
+      - cfx_getInterestRate
+      - cfx_getAccumulateInterestRate
+      - cfx_getConfirmationRiskByHash
+      - cfx_getSkippedBlocksByEpoch
+      - cfx_getBlockRewardInfo
+      - cfx_clientVersion
+      - cfx_getSupplyInfo
+      - cfx_getAccountPendingInfo
+      - cfx_getAccountPendingTransactions
+      - cfx_checkBalanceAgainstTransaction
+      - cfx_getBlocksByEpoch
+      - cfx_getPoSEconomics
+      - cfx_getPoSRewardByEpoch
+      - cfx_getParamsFromVote
+      - pos_getStatus
+      - pos_getAccount
+      - pos_getCommittee
+      - pos_getBlockByHash
+      - pos_getBlockByNumber
+      - pos_getRewardsByEpoch
+      - pos_getTransactionByNumber
+    paid:
+      - trace_block
+      - trace_transaction
+      - cfx_getEpochReceipts
+
+  cfx-core-testnet:
+    free:
+      - cfx_*
+      - pos_*
+    paid:
+      - trace_*
+
+  # =====================
+  # Starknet
+  # =====================
+  starknet-mainnet:
+    free:
+      - starknet_getStateUpdate
+      - starknet_getNonce
+      - starknet_getBlockWithTxHashes
+      - starknet_getBlockWithTxs
+      - starknet_getStorageAt
+      - starknet_getTransactionByBlockIdAndIndex
+      - starknet_getBlockTransactionCount
+      - starknet_pendingTransactions
+      - starknet_getTransactionByHash
+      - starknet_getTransactionReceipt
+      - starknet_getClass
+      - starknet_getClassHashAt
+      - starknet_getClassAt
+      - starknet_call
+      - starknet_blockNumber
+      - starknet_blockHashAndNumber
+      - starknet_chainId
+      - starknet_syncing
+      - starknet_getEvents
+      - starknet_addInvokeTransaction
+      - starknet_addDeployTransaction
+      - starknet_addDeclareTransaction
+      - starknet_estimateFee
+    paid: []
+
+  starknet-testnet:
+    free:
+      - starknet_*
+    paid: []
+
+  # =====================
+  # CKB (Nervos)
+  # =====================
+  ckb-mirana:
+    free:
+      # Chain methods
+      - get_tip_header
+      - get_tip_block_number
+      - get_current_epoch
+      - get_epoch_by_number
+      - get_block_hash
+      - get_block
+      - get_header
+      - get_header_by_number
+      - get_block_filter
+      - get_transaction
+      - get_block_economic_state
+      - get_transaction_proof
+      - verify_transaction_proof
+      - get_fork_block
+      - get_consensus
+      - get_block_median_time
+      # Net methods
+      - local_node_info
+      - get_peers
+      - sync_state
+      # Pool methods
+      - send_transaction
+      - tx_pool_info
+      - get_raw_tx_pool
+      - tx_pool_ready
+      # Stats methods
+      - get_blockchain_info
+      - get_deployments_info
+      # Indexer methods
+      - get_indexer_tip
+      - get_cells
+      - get_transactions
+      - get_cells_capacity
+      # Experiment methods
+      - dry_run_transaction
+      - calculate_dao_maximum_withdraw
+      - estimate_cycles
+      # Subscription
+      - subscribe
+      - unsubscribe
+    paid: []
+
+  # =====================
+  # Other Networks
+  # =====================
+  merlin-mainnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+    paid: []
+
+  merlin-testnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+    paid: []
+
+  sophon-mainnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+      - zks_*
+    paid:
+      - debug_*
+
+  sophon-testnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+      - zks_*
+    paid:
+      - debug_*
+
+  xlayer-mainnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+      - bor_*
+    paid:
+      - trace_*
+
+  dogeos-mainnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+    paid:
+      - debug_*
+
+  dogeos-testnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+    paid:
+      - debug_*
+
+  op-mainnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+    paid:
+      - debug_*
+
+  op-testnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+    paid:
+      - debug_*
+
+  # =====================
+  # Staging Networks (mirror of production)
+  # =====================
+  staging-eth-mainnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+    paid:
+      - trace_*
+      - debug_*
+
+  staging-eth-sepolia:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+    paid:
+      - trace_*
+
+  staging-polygon-mainnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+      - bor_*
+    paid:
+      - trace_*
+
+  staging-arb-mainnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+    paid:
+      - debug_*
+
+  staging-opt-mainnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+    paid:
+      - debug_*
+
+  staging-base-mainnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+    paid:
+      - debug_*
+
+  staging-scroll-mainnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+    paid:
+      - debug_*
+
+  staging-linea-mainnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+    paid:
+      - debug_*
+
+  staging-zksync-era-mainnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+      - zks_*
+    paid:
+      - debug_*
+
+  staging-cfx-espace:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+    paid:
+      - trace_*
+
+  staging-cfx-core:
+    free:
+      - cfx_*
+      - pos_*
+    paid:
+      - trace_*
+
+  staging-starknet-mainnet:
+    free:
+      - starknet_*
+    paid: []
+
+  staging-ckb-mirana:
+    free:
+      - get_*
+      - send_*
+      - local_node_info
+      - get_peers
+      - sync_state
+      - tx_pool_info
+      - get_raw_tx_pool
+      - tx_pool_ready
+      - get_blockchain_info
+      - get_deployments_info
+      - dry_run_transaction
+      - calculate_dao_maximum_withdraw
+      - estimate_cycles
+      - subscribe
+      - unsubscribe
+    paid: []
