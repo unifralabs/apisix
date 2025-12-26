@@ -7,10 +7,14 @@
 --
 
 local cjson = require("cjson.safe")
+local feature_flags = require("unifra.feature_flags")
 
 local _M = {
     version = "1.0.0"
 }
+
+-- cjson.null for proper null handling in JSON
+local cjson_null = cjson.null
 
 -- JSON-RPC 2.0 Standard Error Codes
 _M.ERROR_PARSE = -32700           -- Invalid JSON was received
@@ -53,9 +57,10 @@ end
 --- Parse JSON-RPC request body
 -- Supports both single requests and batch requests per JSON-RPC 2.0 spec.
 -- @param body string The raw request body
--- @return table|nil Parsed result with fields: method, methods, is_batch, count, raw
+-- @param allow_partial boolean Allow partial batch parsing (optional, default: false)
+-- @return table|nil Parsed result with fields: method, methods, is_batch, count, raw, errors
 -- @return string|nil Error message if parsing failed
-function _M.parse(body)
+function _M.parse(body, allow_partial)
     if not body or body == "" then
         return nil, "empty body"
     end
@@ -81,18 +86,41 @@ function _M.parse(body)
 
         local methods = {}
         local ids = {}
+        local errors = {}  -- Track errors for each index
+
         for i, req in ipairs(decoded) do
+            local req_err = nil
+
+            -- Validate request structure
             if type(req) ~= "table" then
-                return nil, "invalid request at index " .. i .. ": not an object"
+                req_err = "not an object"
+            elseif not req.method or type(req.method) ~= "string" then
+                req_err = "missing or invalid method"
+            elseif req.method == "" then
+                req_err = "empty method name"
             end
-            if not req.method or type(req.method) ~= "string" then
-                return nil, "missing or invalid method at index " .. i
+
+            if req_err then
+                if allow_partial then
+                    -- In partial mode, record error and continue
+                    methods[#methods + 1] = nil
+                    -- Safe ID extraction (req may not be a table)
+                    local safe_id = cjson_null
+                    if type(req) == "table" and req.id ~= nil then
+                        safe_id = req.id
+                    end
+                    ids[#ids + 1] = safe_id
+                    errors[i] = req_err
+                else
+                    -- Strict mode: fail entire batch
+                    return nil, "invalid request at index " .. i .. ": " .. req_err
+                end
+            else
+                -- Valid request
+                methods[#methods + 1] = req.method
+                ids[#ids + 1] = req.id
+                errors[i] = nil
             end
-            if req.method == "" then
-                return nil, "empty method name at index " .. i
-            end
-            methods[#methods + 1] = req.method
-            ids[#ids + 1] = req.id
         end
 
         return {
@@ -101,7 +129,8 @@ function _M.parse(body)
             ids = ids,
             is_batch = true,
             count = #decoded,
-            raw = decoded
+            raw = decoded,
+            errors = errors,  -- May contain per-request errors in partial mode
         }, nil
     end
 
@@ -139,6 +168,12 @@ end
 -- @param id any Request ID (optional, can be nil for parse errors)
 -- @return string JSON-encoded error response
 function _M.error_response(code, message, id)
+    -- Properly handle nil id: JSON-RPC spec requires id:null not id omitted
+    -- Use cjson.null when id is nil to encode as "id":null instead of omitting field
+    if id == nil then
+        id = cjson_null
+    end
+
     return cjson.encode({
         jsonrpc = "2.0",
         id = id,
@@ -157,6 +192,11 @@ end
 -- @param id any Request ID (optional)
 -- @return table Error response table
 function _M.error_table(code, message, id)
+    -- Properly handle nil id
+    if id == nil then
+        id = cjson_null
+    end
+
     return {
         jsonrpc = "2.0",
         id = id,

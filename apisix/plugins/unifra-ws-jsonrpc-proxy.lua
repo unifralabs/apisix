@@ -18,7 +18,13 @@ local upstream_mod = require("apisix.upstream")
 local jsonrpc = require("unifra.jsonrpc.core")
 local whitelist_mod = require("unifra.jsonrpc.whitelist")
 local cu_mod = require("unifra.jsonrpc.cu")
-local ratelimit_mod = require("unifra.jsonrpc.ratelimit")
+local redis_scripts = require("unifra.jsonrpc.redis_scripts")
+local redis_circuit_breaker = require("unifra.jsonrpc.redis_circuit_breaker")
+local config_mod = require("unifra.jsonrpc.config")
+local feature_flags = require("unifra.feature_flags")
+local billing = require("unifra.jsonrpc.billing")
+local errors = require("unifra.jsonrpc.errors")
+local metrics = require("unifra.metrics")
 
 local ngx = ngx
 local ipairs = ipairs
@@ -75,6 +81,12 @@ local schema = {
             type = "integer",
             default = 1000000
         },
+        -- Rate limit degradation (for per-second rate limit only)
+        allow_degradation = {
+            type = "boolean",
+            default = true,
+            description = "Allow requests when per-second rate limit service is unavailable (fail-open)"
+        },
         -- Bypass networks
         bypass_networks = {
             type = "array",
@@ -96,9 +108,8 @@ local _M = {
     schema = schema,
 }
 
--- Config caches
-local whitelist_config = nil
-local cu_config = nil
+-- Use unified config module with per-route caching and hot reload support
+-- (Removed global module-level caches that were never refreshed)
 
 
 function _M.check_schema(conf)
@@ -140,12 +151,18 @@ local function check_message(conf, ctx, data)
         return 200, nil
     end
 
-    -- Load configs
+    -- Load configs using unified config module (supports hot reload)
+    -- Uses per-route caching with TTL-based refresh
+    local whitelist_config, wl_load_err = config_mod.load_whitelist(ctx, conf.whitelist_config_path)
     if not whitelist_config then
-        whitelist_config = whitelist_mod.load_config(conf.whitelist_config_path)
+        core.log.error("ws: failed to load whitelist: ", wl_load_err)
+        return 500, jsonrpc.error_response(jsonrpc.ERROR_INTERNAL, "config load failed", nil)
     end
+
+    local cu_config, cu_load_err = config_mod.load_cu_pricing(ctx, conf.cu_config_path)
     if not cu_config then
-        cu_config = cu_mod.load_config(conf.cu_config_path)
+        core.log.error("ws: failed to load CU pricing: ", cu_load_err)
+        return 500, jsonrpc.error_response(jsonrpc.ERROR_INTERNAL, "config load failed", nil)
     end
 
     -- Whitelist check
@@ -164,7 +181,48 @@ local function check_message(conf, ctx, data)
     -- Calculate CU
     local total_cu = cu_mod.calculate(methods, cu_config)
 
-    -- Rate limit check
+    -- Monthly quota check (same as HTTP path)
+    local use_monthly_quota = feature_flags.is_enabled(ctx, "atomic_monthly_quota")
+    if use_monthly_quota then
+        local quota = tonumber(ctx.var.monthly_quota)
+        if quota and quota > 0 then
+            local consumer_name = ctx.var.consumer_name
+            if consumer_name then
+                local redis_conf = {
+                    host = conf.redis_host,
+                    port = conf.redis_port,
+                    password = conf.redis_password,
+                    database = conf.redis_database,
+                    timeout = conf.redis_timeout,
+                }
+
+                local allowed, used, remaining, quota_err = billing.check_and_increment(
+                    redis_conf, ctx, consumer_name, total_cu, quota
+                )
+
+                if quota_err then
+                    core.log.error("ws monthly quota check error: ", quota_err)
+                    return 500, jsonrpc.error_response(
+                        jsonrpc.ERROR_INTERNAL,
+                        "monthly quota service unavailable",
+                        result.ids and result.ids[1]
+                    )
+                end
+
+                if not allowed then
+                    core.log.warn("ws monthly quota exceeded: consumer=", consumer_name,
+                                  ", used=", used, ", quota=", quota)
+                    return 429, jsonrpc.error_response(
+                        jsonrpc.ERROR_QUOTA_EXCEEDED,
+                        "monthly quota exceeded",
+                        result.ids and result.ids[1]
+                    )
+                end
+            end
+        end
+    end
+
+    -- Rate limit check (per-second sliding window, same as HTTP path)
     if conf.enable_rate_limit then
         local limit = tonumber(ctx.var.seconds_quota)
         if limit and limit > 0 then
@@ -178,20 +236,91 @@ local function check_message(conf, ctx, data)
                 timeout = conf.redis_timeout,
             }
 
-            local key = ratelimit_mod.make_key(key_value, 1)
-            local allowed, _, rl_err = ratelimit_mod.check_and_incr(
-                redis_conf, key, total_cu, limit, 1
+            -- Generate unique request ID for ZSET
+            local request_id = (key_value .. ":" .. ngx.now() .. ":" .. math.random(1000000))
+
+            -- Keys for sliding window (ZSET + Hash)
+            local key = "ratelimit:cu:sliding:" .. key_value
+            local hash_key = "ratelimit:cu:sliding:" .. key_value .. ":values"
+
+            -- Current timestamp in milliseconds (1 second window)
+            local now_ms = ngx.now() * 1000
+            local window_ms = 1000  -- 1 second
+
+            -- Execute sliding window script via circuit breaker
+            local script_result, script_err, blocked = redis_circuit_breaker.execute(
+                redis_conf,
+                ctx,
+                function()
+                    local redis = require("resty.redis")
+                    local red = redis:new()
+                    red:set_timeout(redis_conf.timeout or 1000)
+
+                    local ok, conn_err = red:connect(redis_conf.host, redis_conf.port or 6379)
+                    if not ok then
+                        metrics.record_redis_op("connect", false)
+                        return nil, "redis connect failed: " .. (conn_err or "unknown")
+                    end
+
+                    if redis_conf.password and redis_conf.password ~= "" then
+                        local ok, auth_err = red:auth(redis_conf.password)
+                        if not ok then
+                            metrics.record_redis_op("auth", false)
+                            return nil, "redis auth failed: " .. (auth_err or "unknown")
+                        end
+                    end
+
+                    if redis_conf.database and redis_conf.database > 0 then
+                        red:select(redis_conf.database)
+                    end
+
+                    -- Execute sliding window script
+                    local res, exec_err = redis_scripts.execute(
+                        red,
+                        redis_scripts.SLIDING_WINDOW_SCRIPT,
+                        {key, hash_key},
+                        {now_ms, window_ms, limit, total_cu, request_id}
+                    )
+
+                    red:set_keepalive(10000, 100)
+
+                    if exec_err then
+                        metrics.record_redis_op("eval", false)
+                        return nil, exec_err
+                    end
+
+                    metrics.record_redis_op("eval", true)
+                    return res, nil
+                end,
+                conf.allow_degradation  -- Use config parameter (same as HTTP path)
             )
 
-            if rl_err then
-                core.log.warn("ws rate limit error: ", rl_err)
-                -- Allow on Redis error
-            elseif not allowed then
-                return 429, jsonrpc.error_response(
-                    jsonrpc.ERROR_RATE_LIMITED,
-                    "rate limit exceeded",
-                    result.ids and result.ids[1]
-                )
+            -- Handle circuit breaker block or error (respect allow_degradation config)
+            if blocked or script_err then
+                if conf.allow_degradation then
+                    core.log.warn("ws rate limit degradation (sliding window): allowing request, error: ",
+                                 script_err or "circuit breaker open")
+                    -- Allow request (fail-open)
+                else
+                    core.log.error("ws rate limit unavailable (sliding window): rejecting request, error: ",
+                                  script_err or "circuit breaker open")
+                    return 500, jsonrpc.error_response(
+                        jsonrpc.ERROR_INTERNAL,
+                        "rate limiting service unavailable",
+                        result.ids and result.ids[1]
+                    )
+                end
+            else
+                -- Parse result: {allowed (1/0), current_cu, remaining}
+                local allowed = (script_result[1] == 1)
+
+                if not allowed then
+                    return 429, jsonrpc.error_response(
+                        jsonrpc.ERROR_RATE_LIMITED,
+                        "rate limit exceeded",
+                        result.ids and result.ids[1]
+                    )
+                end
             end
         end
     end
@@ -201,8 +330,10 @@ end
 
 
 function _M.access(conf, ctx)
-    -- Only intercept WebSocket upgrade requests
-    if ctx.var.http_upgrade ~= "websocket" then
+    -- Case-insensitive WebSocket upgrade check
+    -- Handles "Websocket", "WebSocket", "WEBSOCKET", etc. properly
+    local upgrade = ctx.var.http_upgrade
+    if not upgrade or upgrade:lower() ~= "websocket" then
         return
     end
 
@@ -280,14 +411,22 @@ function _M.access(conf, ctx)
         return 502
     end
 
-    -- Connection options
+    -- Connection options with SSL verification
     local conn_opts = { timeout = ws_timeout }
 
     if use_ssl then
-        conn_opts.ssl_verify = false
+        -- Enable SSL verification for security (was disabled before)
+        local ws_ssl_verify = feature_flags.is_enabled(ctx, "ws_ssl_verify")
+        conn_opts.ssl_verify = ws_ssl_verify
+
+        -- Set SNI for proper SSL handshake
         local sni = server.domain or server.host
         if sni then
             conn_opts.server_name = sni:match("^([^:]+)")
+        end
+
+        if not ws_ssl_verify then
+            core.log.warn("ws: SSL verification disabled (not recommended for production)")
         end
     end
 

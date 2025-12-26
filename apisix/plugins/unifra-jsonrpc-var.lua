@@ -13,6 +13,7 @@
 
 local core = require("apisix.core")
 local jsonrpc = require("unifra.jsonrpc.core")
+local feature_flags = require("unifra.feature_flags")
 
 local plugin_name = "unifra-jsonrpc-var"
 
@@ -51,11 +52,10 @@ function _M.rewrite(conf, ctx)
         return
     end
 
-    -- Check Content-Type (must be JSON)
-    local content_type = core.request.header(ctx, "Content-Type") or ""
-    if not content_type:find("application/json", 1, true) then
-        return
-    end
+    -- Force JSON parsing regardless of Content-Type
+    -- This prevents bypass attacks where attackers use wrong Content-Type
+    -- to skip security checks (whitelist, CU calculation, guard)
+    -- The JSON parser will fail gracefully if body is not valid JSON
 
     -- Read request body
     local body, err = core.request.get_body()
@@ -65,7 +65,8 @@ function _M.rewrite(conf, ctx)
     end
 
     -- Parse JSON-RPC request
-    local result, err = jsonrpc.parse(body)
+    local allow_partial = feature_flags.is_enabled(ctx, "fix_jsonrpc_batch_partial")
+    local result, err = jsonrpc.parse(body, allow_partial)
     if err then
         -- Return JSON-RPC error response
         local code = jsonrpc.ERROR_PARSE

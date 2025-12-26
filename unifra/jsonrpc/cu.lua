@@ -6,107 +6,56 @@
 -- This is used for rate limiting and billing purposes.
 --
 
+local config_mod = require("unifra.jsonrpc.config")
+
 local _M = {
     version = "1.0.0"
 }
 
--- Configuration cache with TTL support
-local config_cache = nil
-local config_path = nil
-local config_loaded_at = 0
-local CONFIG_TTL = 60  -- Reload config every 60 seconds
-
-
---- Default CU pricing configuration
+-- Default CU pricing configuration
 local DEFAULT_CONFIG = {
     default = 1,
     methods = {}
 }
 
 
---- Load CU pricing configuration from file (YAML or JSON)
--- @param path string Path to the cu-pricing config file
--- @return table Configuration table with 'default' and 'methods' fields
-function _M.load_config(path, force_reload)
-    -- Return cached config if path matches and TTL not expired
-    local now = ngx.now()
-    if not force_reload and config_cache and config_path == path then
-        if (now - config_loaded_at) < CONFIG_TTL then
-            return config_cache
-        end
-        ngx.log(ngx.INFO, "CU pricing config TTL expired, reloading...")
-    end
-
-    -- Try JSON file first (more reliable across environments)
-    local json_path = path:gsub("%.yaml$", ".json")
-    local file = io.open(json_path, "r")
-    local content = nil
-    local is_json = false
-
-    if file then
-        content = file:read("*a")
-        file:close()
-        is_json = true
-        ngx.log(ngx.INFO, "loading CU pricing from JSON: ", json_path)
-    else
-        -- Fall back to YAML
-        file = io.open(path, "r")
-        if not file then
-            ngx.log(ngx.WARN, "cu pricing config not found: ", path, ", using defaults")
-            return DEFAULT_CONFIG
-        end
-        content = file:read("*a")
-        file:close()
-    end
-
-    local parsed = nil
-    local err = nil
-
-    if is_json then
-        -- Parse JSON
-        local cjson = require("cjson.safe")
-        parsed, err = cjson.decode(content)
-    else
-        -- Try to use tinyyaml if available
-        local ok, yaml = pcall(require, "tinyyaml")
-        if not ok then
-            ngx.log(ngx.ERR, "tinyyaml not available, using default config")
-            return DEFAULT_CONFIG
-        end
-        parsed, err = yaml.parse(content)
-    end
-
-    if not parsed then
-        ngx.log(ngx.ERR, "failed to parse cu pricing config: ", err)
-        return DEFAULT_CONFIG
-    end
-
-    local config = {
+--- Process raw CU pricing config into normalized structure
+-- @param parsed table Raw parsed config
+-- @return table Processed configuration
+local function process_cu_config(parsed)
+    return {
         default = parsed.default or 1,
         methods = parsed.methods or {}
     }
-
-    config_cache = config
-    config_path = path
-    config_loaded_at = ngx.now()
-    return config
 end
 
 
---- Set the TTL for configuration cache
--- @param ttl number TTL in seconds (0 = no caching, nil = use default)
-function _M.set_ttl(ttl)
-    if ttl then
-        CONFIG_TTL = ttl
+--- Load CU pricing configuration using unified config module
+-- Uses per-route caching with TTL-based refresh to avoid cross-route interference
+-- @param ctx table APISIX context (optional, for per-route caching)
+-- @param path string Path to the cu-pricing config file
+-- @param ttl number Cache TTL in seconds (optional)
+-- @param force_reload boolean Force reload ignoring cache
+-- @return table Configuration table with 'default' and 'methods' fields
+-- @return string|nil Error message if load failed
+function _M.load_config(ctx, path, ttl, force_reload)
+    -- Use unified config module for per-route caching
+    -- Pass ttl directly to avoid cross-route interference from global set_ttl
+    local raw_config, err = config_mod.load_cu_pricing(ctx, path, ttl, force_reload)
+
+    if not raw_config then
+        ngx.log(ngx.WARN, "CU pricing config load failed: ", err or "unknown", ", using defaults")
+        return DEFAULT_CONFIG, err
     end
+
+    -- Process raw config into normalized structure
+    return process_cu_config(raw_config), nil
 end
 
 
---- Clear configuration cache
+--- Legacy compatibility: Clear cache via unified config module
 function _M.clear_cache()
-    config_cache = nil
-    config_path = nil
-    config_loaded_at = 0
+    config_mod.clear_cache("cu_pricing")
 end
 
 

@@ -49,9 +49,6 @@ local _M = {
     schema = schema,
 }
 
--- Config cache
-local config_cache = nil
-
 
 function _M.check_schema(conf)
     return core.schema.check(schema, conf)
@@ -80,9 +77,18 @@ function _M.access(conf, ctx)
         return
     end
 
-    -- Set TTL and load whitelist configuration (with TTL-based caching)
-    whitelist.set_ttl(conf.config_ttl)
-    config_cache = whitelist.load_config(conf.config_path)
+    -- Load whitelist configuration using unified config module
+    -- Pass TTL directly (not via set_ttl) to avoid cross-route interference
+    local config_cache, err = whitelist.load_config(ctx, conf.config_path, conf.config_ttl)
+    if not config_cache then
+        core.log.error("failed to load whitelist config: ", err, ", denying request")
+        core.response.set_header("Content-Type", "application/json")
+        return 500, jsonrpc.error_response(
+            jsonrpc.ERROR_INTERNAL,
+            "whitelist config unavailable",
+            ctx.jsonrpc.ids and ctx.jsonrpc.ids[1]
+        )
+    end
 
     local network = ctx.var.unifra_network
     local methods = ctx.var.jsonrpc_methods

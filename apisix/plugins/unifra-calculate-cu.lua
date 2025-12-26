@@ -36,9 +36,6 @@ local _M = {
     schema = schema,
 }
 
--- Config cache
-local config_cache = nil
-
 
 function _M.check_schema(conf)
     return core.schema.check(schema, conf)
@@ -52,9 +49,14 @@ function _M.access(conf, ctx)
         return
     end
 
-    -- Set TTL and load CU pricing configuration (with TTL-based caching)
-    cu.set_ttl(conf.config_ttl)
-    config_cache = cu.load_config(conf.config_path)
+    -- Load CU pricing configuration using unified config module
+    -- Pass TTL directly (not via set_ttl) to avoid cross-route interference
+    local config_cache, err = cu.load_config(ctx, conf.config_path, conf.config_ttl)
+    if not config_cache then
+        core.log.error("failed to load CU config: ", err, ", using default CU=1")
+        ctx.var.cu = 1
+        return
+    end
 
     -- Calculate total CU for all methods
     local methods = ctx.var.jsonrpc_methods
