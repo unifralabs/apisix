@@ -26,3 +26,6 @@ test-env/redis-data/
 *.tmp
 *.bak
 *.orig
+
+# Git worktrees
+.worktrees/
