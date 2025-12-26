@@ -285,6 +285,39 @@ fi
 
 echo ""
 echo "========================================"
+echo " Running Additional Test Suites"
+echo "========================================"
+echo ""
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+EXTRA_TESTS_PASSED=0
+EXTRA_TESTS_FAILED=0
+
+run_extra_test() {
+    local name="$1"
+    local script="$2"
+
+    if [ -x "$script" ]; then
+        info "Running $name..."
+        if "$script" >/dev/null 2>&1; then
+            pass "$name completed"
+            ((EXTRA_TESTS_PASSED++))
+        else
+            fail "$name failed (see individual test output for details)"
+            ((EXTRA_TESTS_FAILED++))
+        fi
+    else
+        info "Skipping $name (not executable)"
+    fi
+}
+
+run_extra_test "P0: Billing Accuracy" "$SCRIPT_DIR/test-billing.sh"
+run_extra_test "P0: Rate Limiting" "$SCRIPT_DIR/test-rate-limiting.sh"
+run_extra_test "P1: Concurrent Requests" "$SCRIPT_DIR/test-concurrent.sh"
+run_extra_test "P1: Failure Scenarios" "$SCRIPT_DIR/test-failures.sh"
+
+echo ""
+echo "========================================"
 echo " Summary"
 echo "========================================"
 echo ""
@@ -296,4 +329,11 @@ echo "  - unifra-calculate-cu: Compute unit calculation"
 echo "  - unifra-limit-cu: Per-second rate limiting"
 echo "  - unifra-limit-monthly-cu: Monthly quota management"
 echo ""
-echo "Test completed!"
+echo "Extra test suites: $EXTRA_TESTS_PASSED passed, $EXTRA_TESTS_FAILED failed"
+echo ""
+if [ "$EXTRA_TESTS_FAILED" -eq 0 ]; then
+    echo "All tests completed successfully!"
+else
+    echo "Some tests failed. Run individual test scripts for details."
+    exit 1
+fi
