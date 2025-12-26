@@ -263,11 +263,23 @@ function _M.execute(redis, script, keys, args)
     local script_key = ngx.md5(script)
     local sha = script_shas[script_key]
 
+    -- Build flat arguments array for evalsha
+    -- NOTE: We must build a single array because Lua's unpack() in non-tail
+    -- position only returns the first element. For example:
+    -- func(unpack({1,2}), unpack({3,4})) becomes func(1, 3, 4) -- 2 is lost!
+    local flat_args = {#keys}
+    for _, k in ipairs(keys) do
+        flat_args[#flat_args + 1] = k
+    end
+    for _, a in ipairs(args) do
+        flat_args[#flat_args + 1] = a
+    end
+
     local result, err
 
     if sha then
         -- Try EVALSHA first (faster)
-        result, err = redis:evalsha(sha, #keys, unpack(keys), unpack(args))
+        result, err = redis:evalsha(sha, unpack(flat_args))
 
         if err and err:find("NOSCRIPT") then
             -- Script not loaded, load and retry
@@ -285,7 +297,7 @@ function _M.execute(redis, script, keys, args)
         script_shas[script_key] = sha
 
         -- Execute by SHA1
-        result, err = redis:evalsha(sha, #keys, unpack(keys), unpack(args))
+        result, err = redis:evalsha(sha, unpack(flat_args))
     end
 
     if err then

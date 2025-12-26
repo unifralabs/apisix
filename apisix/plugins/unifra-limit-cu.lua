@@ -203,7 +203,8 @@ function _M.sliding_window_check(conf, ctx, cu, limit, key_value)
     -- Handle circuit breaker block or error
     if blocked or script_err then
         if conf.allow_degradation then
-            core.log.warn("rate limit degradation (sliding window): allowing request")
+            core.log.warn("rate limit degradation (sliding window): allowing request",
+                         ", blocked=", blocked, ", script_err=", script_err)
             return
         else
             return errors.response(

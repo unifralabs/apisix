@@ -37,6 +37,8 @@ local MAX_BATCH_SIZE = 100
 
 
 --- Check if a table is an array (JSON array)
+-- For JSON-RPC, we treat empty tables as arrays (batch with zero requests)
+-- since [] is the more common error case than {}
 -- @param t table to check
 -- @return boolean true if array, false otherwise
 local function is_array(t)
@@ -50,7 +52,9 @@ local function is_array(t)
             return false
         end
     end
-    return i > 0
+    -- Empty table is treated as empty array for JSON-RPC
+    -- This ensures "[]" returns "empty batch" error
+    return true
 end
 
 

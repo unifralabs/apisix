@@ -301,10 +301,10 @@ run_extra_test() {
         info "Running $name..."
         if "$script" >/dev/null 2>&1; then
             pass "$name completed"
-            ((EXTRA_TESTS_PASSED++))
+            ((EXTRA_TESTS_PASSED++)) || true  # Prevent exit when incrementing from 0
         else
             fail "$name failed (see individual test output for details)"
-            ((EXTRA_TESTS_FAILED++))
+            ((EXTRA_TESTS_FAILED++)) || true  # Prevent exit when incrementing from 0
         fi
     else
         info "Skipping $name (not executable)"
@@ -312,8 +312,11 @@ run_extra_test() {
 }
 
 run_extra_test "P0: Billing Accuracy" "$SCRIPT_DIR/test-billing.sh"
+sleep 1  # Allow rate limit window to reset
 run_extra_test "P0: Rate Limiting" "$SCRIPT_DIR/test-rate-limiting.sh"
+sleep 1  # Allow rate limit window to reset
 run_extra_test "P1: Concurrent Requests" "$SCRIPT_DIR/test-concurrent.sh"
+sleep 1  # Allow rate limit window to reset
 run_extra_test "P1: Failure Scenarios" "$SCRIPT_DIR/test-failures.sh"
 
 echo ""

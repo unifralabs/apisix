@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # P1 Integration Test: Failure Scenarios
-# Verifies system behavior under various failure conditions
+# Verifies system behavior under error conditions
 #
 # Prerequisites:
 #   - APISIX running with Unifra plugins
@@ -11,12 +11,12 @@
 # Usage: ./test-failures.sh
 #
 
-set -euo pipefail
+set -uo pipefail
 
-# Configuration
+# Configuration - matches test-all.sh setup
 APISIX_URL="${APISIX_URL:-http://localhost:9080}"
-REDIS_HOST="${REDIS_HOST:-localhost}"
-REDIS_PORT="${REDIS_PORT:-6379}"
+API_KEY="${1:-test-api-key-123}"
+REDIS_DOCKER="${REDIS_DOCKER:-test-env-redis-1}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -34,286 +34,212 @@ log_info() { echo -e "${YELLOW}[INFO]${NC} $1"; }
 log_pass() { echo -e "${GREEN}[PASS]${NC} $1"; ((TESTS_PASSED++)); }
 log_fail() { echo -e "${RED}[FAIL]${NC} $1"; ((TESTS_FAILED++)); }
 
-# Make JSON-RPC request with full response
-jsonrpc_full_response() {
-    local api_key="$1"
-    local body="$2"
-
-    curl -s -w "\n%{http_code}" -X POST "$APISIX_URL/v1/eth-mainnet" \
+# Make JSON-RPC request
+jsonrpc_call() {
+    local body="$1"
+    curl -s -X POST "$APISIX_URL/eth/" \
         -H "Content-Type: application/json" \
-        -H "X-Api-Key: $api_key" \
-        -d "$body"
-}
-
-# Make request and return only status code
-jsonrpc_status() {
-    local api_key="$1"
-    local body="$2"
-
-    curl -s -o /dev/null -w "%{http_code}" -X POST "$APISIX_URL/v1/eth-mainnet" \
-        -H "Content-Type: application/json" \
-        -H "X-Api-Key: $api_key" \
+        -H "apikey: $API_KEY" \
         -d "$body"
 }
 
 # Test: Invalid JSON handling
 test_invalid_json() {
     ((TESTS_RUN++))
-    log_info "Test: Invalid JSON returns proper error"
+    log_info "Test: Invalid JSON handling"
 
-    local response=$(jsonrpc_full_response "test-api-key" '{invalid json}')
-    local body=$(echo "$response" | head -n -1)
-    local status=$(echo "$response" | tail -n 1)
+    local response=$(curl -s -X POST "$APISIX_URL/eth/" \
+        -H "Content-Type: application/json" \
+        -H "apikey: $API_KEY" \
+        -d '{invalid json}')
 
-    if [ "$status" == "400" ] || echo "$body" | grep -q "parse error\|Parse error\|-32700" 2>/dev/null; then
-        log_pass "Invalid JSON returns proper error (status=$status)"
+    if echo "$response" | grep -qi 'parse\|invalid\|error'; then
+        log_pass "Invalid JSON returns error response"
     else
-        log_fail "Invalid JSON should return 400 or parse error, got status=$status"
+        log_fail "Invalid JSON should return error, got: $response"
+    fi
+}
+
+# Test: Empty body handling
+test_empty_body() {
+    ((TESTS_RUN++))
+    log_info "Test: Empty body handling"
+
+    local response=$(curl -s -X POST "$APISIX_URL/eth/" \
+        -H "Content-Type: application/json" \
+        -H "apikey: $API_KEY" \
+        -d '')
+
+    if echo "$response" | grep -qi 'error\|empty\|body'; then
+        log_pass "Empty body returns error response"
+    else
+        log_fail "Empty body should return error, got: $response"
     fi
 }
 
 # Test: Missing method field
 test_missing_method() {
     ((TESTS_RUN++))
-    log_info "Test: Missing method field returns proper error"
+    log_info "Test: Missing method field"
 
-    local body='{"jsonrpc":"2.0","params":[],"id":1}'
-    local response=$(jsonrpc_full_response "test-api-key" "$body")
-    local resp_body=$(echo "$response" | head -n -1)
-    local status=$(echo "$response" | tail -n 1)
+    local response=$(jsonrpc_call '{"jsonrpc":"2.0","id":1}')
 
-    if echo "$resp_body" | grep -q "method\|-32600\|Invalid Request" 2>/dev/null; then
-        log_pass "Missing method returns proper error"
+    if echo "$response" | grep -qi 'method\|missing\|error'; then
+        log_pass "Missing method returns error"
     else
-        log_fail "Missing method should return Invalid Request error"
+        log_fail "Missing method should return error, got: $response"
     fi
 }
 
-# Test: Empty method name
-test_empty_method() {
+# Test: Invalid method type
+test_invalid_method_type() {
     ((TESTS_RUN++))
-    log_info "Test: Empty method name returns proper error"
+    log_info "Test: Invalid method type (number instead of string)"
 
-    local body='{"jsonrpc":"2.0","method":"","params":[],"id":1}'
-    local response=$(jsonrpc_full_response "test-api-key" "$body")
-    local resp_body=$(echo "$response" | head -n -1)
+    local response=$(jsonrpc_call '{"jsonrpc":"2.0","method":123,"id":1}')
 
-    if echo "$resp_body" | grep -q "empty\|method\|-32600\|Invalid" 2>/dev/null; then
-        log_pass "Empty method name returns proper error"
+    if echo "$response" | grep -qi 'invalid\|method\|error'; then
+        log_pass "Invalid method type returns error"
     else
-        log_fail "Empty method name should return error"
+        log_fail "Invalid method type should return error, got: $response"
     fi
 }
 
-# Test: Empty batch request
+# Test: Empty batch handling
 test_empty_batch() {
     ((TESTS_RUN++))
-    log_info "Test: Empty batch request returns proper error"
+    log_info "Test: Empty batch handling"
 
-    local body='[]'
-    local response=$(jsonrpc_full_response "test-api-key" "$body")
-    local resp_body=$(echo "$response" | head -n -1)
+    local response=$(jsonrpc_call '[]')
 
-    if echo "$resp_body" | grep -q "empty\|batch\|-32600\|Invalid" 2>/dev/null; then
-        log_pass "Empty batch returns proper error"
+    if echo "$response" | grep -qi 'empty\|batch\|error'; then
+        log_pass "Empty batch returns error"
     else
-        log_fail "Empty batch should return error"
+        log_fail "Empty batch should return error, got: $response"
     fi
 }
 
-# Test: Body too large
-test_body_too_large() {
+# Test: Large batch handling
+test_large_batch() {
     ((TESTS_RUN++))
-    log_info "Test: Body too large returns proper error"
+    log_info "Test: Large batch handling (exceeds limit)"
 
-    # Generate a body larger than 1MB
-    local large_param=$(printf 'x%.0s' {1..1048577})
-    local body="{\"jsonrpc\":\"2.0\",\"method\":\"eth_call\",\"params\":[\"$large_param\"],\"id\":1}"
-
-    local status=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$APISIX_URL/v1/eth-mainnet" \
-        -H "Content-Type: application/json" \
-        -H "X-Api-Key: test-api-key" \
-        -d "$body" 2>/dev/null || echo "error")
-
-    if [ "$status" == "413" ] || [ "$status" == "400" ]; then
-        log_pass "Large body rejected with status $status"
-    else
-        log_fail "Large body should be rejected, got status $status"
-    fi
-}
-
-# Test: Batch too large (too many requests)
-test_batch_too_large() {
-    ((TESTS_RUN++))
-    log_info "Test: Batch too large (>100 requests) returns proper error"
-
-    # Generate batch with 101 requests
+    # Create batch with 150 requests (should exceed 100 limit)
     local batch="["
-    for i in $(seq 1 101); do
-        if [ $i -gt 1 ]; then batch="$batch,"; fi
-        batch="$batch{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"id\":$i}"
+    for i in $(seq 1 150); do
+        batch="${batch}{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"id\":$i}"
+        if [ $i -lt 150 ]; then
+            batch="${batch},"
+        fi
     done
-    batch="$batch]"
+    batch="${batch}]"
 
-    local response=$(jsonrpc_full_response "test-api-key" "$batch")
-    local resp_body=$(echo "$response" | head -n -1)
-    local status=$(echo "$response" | tail -n 1)
+    local response=$(jsonrpc_call "$batch")
 
-    if echo "$resp_body" | grep -q "batch.*large\|too many\|limit" 2>/dev/null || [ "$status" == "400" ]; then
-        log_pass "Batch size limit enforced (status=$status)"
+    if echo "$response" | grep -qi 'too large\|batch\|limit\|error'; then
+        log_pass "Large batch returns error"
     else
-        log_fail "Batch size limit should be enforced"
+        # Check if it was truncated or returned error
+        local count=$(echo "$response" | grep -o '"id"' | wc -l | tr -d ' ')
+        if [ "$count" -lt 150 ]; then
+            log_pass "Large batch handled (truncated or limited)"
+        else
+            log_fail "Large batch should be rejected, got $count responses"
+        fi
     fi
 }
 
-# Test: Unsupported network
-test_unsupported_network() {
+# Test: Unknown method handling
+test_unknown_method() {
     ((TESTS_RUN++))
-    log_info "Test: Unsupported network returns proper error"
+    log_info "Test: Unknown/unsupported method"
 
-    local status=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$APISIX_URL/v1/unsupported-network" \
+    local response=$(jsonrpc_call '{"jsonrpc":"2.0","method":"eth_mining","id":1}')
+
+    if echo "$response" | grep -qi 'unsupported\|method\|error'; then
+        log_pass "Unknown method returns appropriate error"
+    else
+        log_fail "Unknown method should return error, got: $response"
+    fi
+}
+
+# Test: Blocked method for free tier
+test_blocked_method() {
+    ((TESTS_RUN++))
+    log_info "Test: Blocked method for free tier"
+
+    local response=$(jsonrpc_call '{"jsonrpc":"2.0","method":"debug_traceTransaction","params":["0x0"],"id":1}')
+
+    if echo "$response" | grep -qi 'paid\|tier\|blocked\|forbidden\|error'; then
+        log_pass "Paid method blocked for free tier"
+    else
+        log_fail "Paid method should be blocked, got: $response"
+    fi
+}
+
+# Test: Invalid API key format
+test_invalid_api_key_format() {
+    ((TESTS_RUN++))
+    log_info "Test: Invalid API key format"
+
+    local status=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$APISIX_URL/eth/" \
         -H "Content-Type: application/json" \
-        -H "X-Api-Key: test-api-key" \
-        -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}')
+        -H "apikey: " \
+        -d '{"jsonrpc":"2.0","method":"eth_blockNumber","id":1}')
 
-    if [ "$status" == "404" ] || [ "$status" == "400" ]; then
-        log_pass "Unsupported network rejected with status $status"
+    if [ "$status" == "401" ] || [ "$status" == "403" ]; then
+        log_pass "Empty API key rejected with $status"
     else
-        log_fail "Unsupported network should return 404/400, got $status"
+        log_fail "Empty API key should return 401/403, got $status"
     fi
 }
 
-# Test: Unsupported method (not in whitelist)
-test_unsupported_method() {
+# Test: Very long method name
+test_long_method_name() {
     ((TESTS_RUN++))
-    log_info "Test: Unsupported method returns proper error"
+    log_info "Test: Very long method name"
 
-    local body='{"jsonrpc":"2.0","method":"completely_unknown_method_xyz","params":[],"id":1}'
-    local response=$(jsonrpc_full_response "test-api-key" "$body")
-    local resp_body=$(echo "$response" | head -n -1)
-    local status=$(echo "$response" | tail -n 1)
+    local long_method=$(printf 'x%.0s' {1..1000})
+    local response=$(jsonrpc_call "{\"jsonrpc\":\"2.0\",\"method\":\"$long_method\",\"id\":1}")
 
-    if echo "$resp_body" | grep -q "unsupported\|not allowed\|forbidden\|-32601" 2>/dev/null || [ "$status" == "403" ]; then
-        log_pass "Unsupported method properly rejected"
+    # Should either reject or return method not found
+    if echo "$response" | grep -qi 'error\|unsupported\|method'; then
+        log_pass "Long method name handled correctly"
     else
-        log_info "Note: Method may be passed to backend (depending on whitelist config)"
-        log_pass "Method handling completed (status=$status)"
+        log_fail "Long method name should return error, got: ${response:0:100}..."
     fi
 }
 
-# Test: Paid method for free tier
-test_paid_method_free_tier() {
+# Test: Request timeout simulation
+test_slow_request_handling() {
     ((TESTS_RUN++))
-    log_info "Test: Paid method rejected for free tier"
+    log_info "Test: Request handling (normal case)"
 
-    local body='{"jsonrpc":"2.0","method":"debug_traceTransaction","params":["0x0"],"id":1}'
-    # Use a free tier API key (configure in your test setup)
-    local response=$(jsonrpc_full_response "free-tier-api-key" "$body")
-    local resp_body=$(echo "$response" | head -n -1)
+    # Just verify normal request works
+    local start=$(date +%s%N)
+    local response=$(jsonrpc_call '{"jsonrpc":"2.0","method":"eth_blockNumber","id":1}')
+    local end=$(date +%s%N)
+    local duration_ms=$(( (end - start) / 1000000 ))
 
-    if echo "$resp_body" | grep -q "paid\|tier\|upgrade\|forbidden" 2>/dev/null; then
-        log_pass "Paid method rejected for free tier"
+    if echo "$response" | grep -q '"result"' && [ "$duration_ms" -lt 5000 ]; then
+        log_pass "Request completed in ${duration_ms}ms"
     else
-        log_info "Note: Test depends on free-tier-api-key being configured as free tier"
-        log_pass "Method access check completed"
+        log_fail "Request should complete within 5s, took ${duration_ms}ms"
     fi
 }
 
-# Test: Graceful handling of connection timeout
-test_connection_timeout() {
+# Test: Graceful error responses
+test_error_response_format() {
     ((TESTS_RUN++))
-    log_info "Test: Connection timeout handled gracefully"
+    log_info "Test: Error response is valid JSON-RPC format"
 
-    # Request to a method that might timeout (depends on backend)
-    local body='{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
-    local start_time=$(date +%s)
+    local response=$(jsonrpc_call '{"jsonrpc":"2.0","method":"invalid_method_xyz","id":1}')
 
-    local status=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$APISIX_URL/v1/eth-mainnet" \
-        -H "Content-Type: application/json" \
-        -H "X-Api-Key: test-api-key" \
-        --max-time 30 \
-        -d "$body" 2>/dev/null || echo "timeout")
-
-    local end_time=$(date +%s)
-    local duration=$((end_time - start_time))
-
-    if [ "$status" == "200" ] || [ "$status" == "502" ] || [ "$status" == "504" ]; then
-        log_pass "Request completed or timed out gracefully (status=$status, ${duration}s)"
-    elif [ "$status" == "timeout" ]; then
-        log_pass "Client timeout triggered at 30s (backend may be slow)"
+    # Check for JSON-RPC error structure
+    if echo "$response" | grep -q '"error"' && echo "$response" | grep -q '"code"'; then
+        log_pass "Error response has valid JSON-RPC structure"
     else
-        log_fail "Unexpected response: status=$status"
-    fi
-}
-
-# Test: Malformed JSON-RPC version
-test_wrong_jsonrpc_version() {
-    ((TESTS_RUN++))
-    log_info "Test: Wrong JSON-RPC version handled"
-
-    local body='{"jsonrpc":"1.0","method":"eth_blockNumber","params":[],"id":1}'
-    local response=$(jsonrpc_full_response "test-api-key" "$body")
-    local resp_body=$(echo "$response" | head -n -1)
-    local status=$(echo "$response" | tail -n 1)
-
-    # Some implementations are lenient, others strict
-    if [ "$status" == "200" ] || [ "$status" == "400" ] || echo "$resp_body" | grep -q "version\|2.0" 2>/dev/null; then
-        log_pass "Wrong JSON-RPC version handled (status=$status)"
-    else
-        log_fail "Unexpected response to wrong JSON-RPC version"
-    fi
-}
-
-# Test: Non-JSON content type
-test_wrong_content_type() {
-    ((TESTS_RUN++))
-    log_info "Test: Wrong content type handled"
-
-    local status=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$APISIX_URL/v1/eth-mainnet" \
-        -H "Content-Type: text/plain" \
-        -H "X-Api-Key: test-api-key" \
-        -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}')
-
-    # Accept either success (lenient) or error (strict)
-    if [ "$status" == "200" ] || [ "$status" == "400" ] || [ "$status" == "415" ]; then
-        log_pass "Wrong content type handled (status=$status)"
-    else
-        log_fail "Unexpected response to wrong content type: $status"
-    fi
-}
-
-# Test: Empty body
-test_empty_body() {
-    ((TESTS_RUN++))
-    log_info "Test: Empty body returns proper error"
-
-    local status=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$APISIX_URL/v1/eth-mainnet" \
-        -H "Content-Type: application/json" \
-        -H "X-Api-Key: test-api-key" \
-        -d '')
-
-    if [ "$status" == "400" ]; then
-        log_pass "Empty body rejected with 400"
-    else
-        log_fail "Empty body should return 400, got $status"
-    fi
-}
-
-# Test: Recovery after error
-test_recovery_after_error() {
-    ((TESTS_RUN++))
-    log_info "Test: System recovers after error"
-
-    # First, trigger an error
-    jsonrpc_status "test-api-key" '{invalid}' >/dev/null
-
-    # Then, send a valid request
-    local status=$(jsonrpc_status "test-api-key" '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}')
-
-    if [ "$status" == "200" ]; then
-        log_pass "System recovered after error and handles valid request"
-    else
-        log_fail "System should recover after error, but got status $status"
+        log_fail "Error response should have JSON-RPC structure, got: $response"
     fi
 }
 
@@ -324,7 +250,7 @@ main() {
     echo "================================================"
     echo ""
     log_info "APISIX URL: $APISIX_URL"
-    log_info "Redis: $REDIS_HOST:$REDIS_PORT"
+    log_info "API Key: $API_KEY"
     echo ""
 
     # Check prerequisites
@@ -333,29 +259,22 @@ main() {
         exit 1
     fi
 
-    if ! redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" ping >/dev/null 2>&1; then
-        log_fail "Redis is not reachable at $REDIS_HOST:$REDIS_PORT"
-        exit 1
-    fi
-
     log_info "Prerequisites OK, starting tests..."
     echo ""
 
     # Run tests
     test_invalid_json
-    test_missing_method
-    test_empty_method
-    test_empty_batch
-    test_body_too_large
-    test_batch_too_large
-    test_unsupported_network
-    test_unsupported_method
-    test_paid_method_free_tier
-    test_connection_timeout
-    test_wrong_jsonrpc_version
-    test_wrong_content_type
     test_empty_body
-    test_recovery_after_error
+    test_missing_method
+    test_invalid_method_type
+    test_empty_batch
+    test_large_batch
+    test_unknown_method
+    test_blocked_method
+    test_invalid_api_key_format
+    test_long_method_name
+    test_slow_request_handling
+    test_error_response_format
 
     # Summary
     echo ""

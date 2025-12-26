@@ -3,7 +3,75 @@
 -- Provides essential ngx.* functions used by Unifra modules
 --
 
+local cjson = require("cjson.safe")
+
 local _M = {}
+
+-- Mock apisix.core module
+local mock_core = {
+    version = "mock",
+
+    log = {
+        error = function(...) _M.log(_M.ERR, ...) end,
+        warn = function(...) _M.log(_M.WARN, ...) end,
+        info = function(...) _M.log(_M.INFO, ...) end,
+        debug = function(...) _M.log(_M.DEBUG, ...) end,
+        notice = function(...) _M.log(_M.NOTICE, ...) end,
+    },
+
+    response = {
+        _headers = {},
+        set_header = function(name, value)
+            mock_core.response._headers[name] = value
+        end,
+        get_headers = function()
+            return mock_core.response._headers
+        end,
+        reset = function()
+            mock_core.response._headers = {}
+        end
+    },
+
+    json = {
+        encode = function(data)
+            return cjson.encode(data)
+        end,
+        decode = function(str)
+            return cjson.decode(str)
+        end
+    },
+
+    table = {
+        new = function(narr, nrec)
+            return {}
+        end,
+        clear = function(t)
+            for k in pairs(t) do
+                t[k] = nil
+            end
+        end
+    },
+
+    string = {
+        has_prefix = function(s, prefix)
+            return s:sub(1, #prefix) == prefix
+        end,
+        has_suffix = function(s, suffix)
+            return suffix == "" or s:sub(-#suffix) == suffix
+        end
+    },
+
+    config = {
+        local_conf = function()
+            return {}
+        end
+    }
+}
+
+-- Install apisix.core mock
+function _M.install_apisix_core()
+    package.loaded["apisix.core"] = mock_core
+end
 
 -- Log levels
 _M.DEBUG = 8
@@ -105,6 +173,7 @@ function _M.reset()
     _M.req._headers = {}
     _M._response_body = nil
     _M._exit_status = nil
+    mock_core.response._headers = {}
 end
 
 -- Get logs at specific level
@@ -121,11 +190,18 @@ end
 -- Install as global ngx
 function _M.install()
     _G.ngx = _M
+    _M.install_apisix_core()
 end
 
 -- Uninstall global ngx
 function _M.uninstall()
     _G.ngx = nil
+    package.loaded["apisix.core"] = nil
+end
+
+-- Reset apisix.core mock state
+function _M.reset_core()
+    mock_core.response._headers = {}
 end
 
 return _M
