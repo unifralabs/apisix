@@ -1,0 +1,14 @@
+# Minimal setup for component tests (Redis only)
+# Usage: docker-compose -f docker-compose-minimal.yml up -d
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 5
+    command: redis-server --appendonly no --save ""

@@ -1,0 +1,126 @@
+name: Test Suite
+
+on:
+  push:
+    branches: [master, main, develop, 'feature/*']
+  pull_request:
+    branches: [master, main]
+
+env:
+  REDIS_HOST: localhost
+  REDIS_PORT: 6379
+
+jobs:
+  # Stage 1: Unit Tests (fastest feedback)
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Lua
+        uses: leafo/gh-actions-lua@v10
+        with:
+          luaVersion: "5.1"
+
+      - name: Setup LuaRocks
+        uses: leafo/gh-actions-luarocks@v4
+
+      - name: Install dependencies
+        run: |
+          luarocks install busted
+          luarocks install luafilesystem
+          luarocks install lua-cjson
+
+      - name: Run unit tests
+        run: |
+          cd tests
+          busted unit/ --verbose --output=TAP
+
+  # Stage 2: Component Tests (with Redis)
+  component-tests:
+    name: Component Tests
+    runs-on: ubuntu-latest
+    needs: unit-tests
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Lua
+        uses: leafo/gh-actions-lua@v10
+        with:
+          luaVersion: "5.1"
+
+      - name: Setup LuaRocks
+        uses: leafo/gh-actions-luarocks@v4
+
+      - name: Install dependencies
+        run: |
+          luarocks install busted
+          luarocks install luafilesystem
+          luarocks install lua-cjson
+          luarocks install redis-lua
+
+      - name: Run component tests
+        run: |
+          cd tests
+          busted component/ --verbose --output=TAP
+
+  # Stage 3: Integration Tests (full stack)
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: component-tests
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start test environment
+        run: |
+          cd test-env
+          docker-compose up -d
+
+      - name: Install Foundry (Anvil)
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Start Anvil
+        run: |
+          anvil --host 0.0.0.0 --port 8545 &
+          sleep 5
+
+      - name: Wait for APISIX
+        run: |
+          timeout 60 bash -c 'until curl -s http://localhost:9180/apisix/admin/plugins/list -H "X-API-KEY: unifra-test-admin-key" > /dev/null; do sleep 2; done'
+
+      - name: Run integration tests
+        run: ./test-env/test-all.sh
+
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          docker-compose -f test-env/docker-compose.yml logs > apisix-logs.txt
+
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apisix-logs
+          path: apisix-logs.txt
+
+      - name: Cleanup
+        if: always()
+        run: |
+          cd test-env
+          docker-compose down -v
