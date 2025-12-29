@@ -1,62 +1,44 @@
-FROM api7/apisix-base:dev AS build
+#
+# Unifra APISIX - Zero Intrusion Docker Image
+#
+# This image adds Unifra plugins to the official Apache APISIX image.
+# No modifications to APISIX core - plugins are loaded via extra_lua_path.
+#
+# Usage:
+#   docker run -v ./config.yaml:/usr/local/apisix/conf/config.yaml ghcr.io/unifralabs/apisix:latest
+#
 
-ARG ENABLE_PROXY=false
+ARG APISIX_VERSION=3.14.0-debian
+FROM apache/apisix:${APISIX_VERSION}
 
-ENV DEBIAN_FRONTEND noninteractive
+LABEL org.opencontainers.image.title="Unifra APISIX"
+LABEL org.opencontainers.image.description="Apache APISIX with Unifra JSON-RPC gateway plugins"
+LABEL org.opencontainers.image.source="https://github.com/unifralabs/apisix"
 
-COPY . /apisix
-WORKDIR /apisix
-
-RUN set -x \
-    && (test "${ENABLE_PROXY}" != "true" || /bin/sed -i 's,http://deb.debian.org,http://mirrors.aliyun.com,g' /etc/apt/sources.list) \
-    && apt-get -y update --fix-missing \
-    && apt-get install -y curl \
-        gawk \
-        libldap2-dev \
-        liblua5.1-0-dev \
-        lua5.1 \
-        make \
-        sudo \
-        unzip \
-        wget \
-        gnupg2
-
-RUN set -x \
-    && bash utils/install-dependencies.sh \
-    && make deps \
-    && make install \
-    && mv /usr/share/lua/5.1/apisix /usr/local/apisix \
-    && mv /apisix/deps /usr/local/apisix
-
-FROM api7/apisix-base:dev AS production-stage
-
-COPY --from=build /usr/local/apisix /usr/local/apisix
-COPY --from=build /usr/bin/apisix /usr/bin/apisix
-
-ENV DEBIAN_FRONTEND noninteractive
-RUN apt-get -y update --fix-missing \
-    && apt-get install -y \
-        libldap2-dev \
-    && apt-get remove --purge --auto-remove -y
-
-WORKDIR /usr/local/apisix
-
-ENV PATH=$PATH:/usr/local/openresty-debug/luajit/bin:/usr/local/openresty-debug/nginx/sbin:/usr/local/openresty-debug/bin
-
-EXPOSE 9080 9443
-
-COPY ./docker/docker-entrypoint.sh /docker-entrypoint.sh
-
-RUN chmod +x /docker-entrypoint.sh \
-    # forward request and error logs to docker log collector
-    && ln -sf /dev/stdout /usr/local/apisix/logs/access.log \
-    && ln -sf /dev/stderr /usr/local/apisix/logs/error.log \
-    && useradd -u 1001 apisix && chown -R apisix:apisix /usr/local/apisix
-
+# Switch to root to copy files
 USER root
 
-ENTRYPOINT ["/docker-entrypoint.sh"]
+# Copy Unifra library modules
+COPY --chmod=644 unifra /opt/unifra-apisix/unifra
 
-CMD ["docker-start"]
+# Copy APISIX plugins (must be in apisix/plugins/ path for APISIX to find them)
+COPY --chmod=644 apisix/plugins /opt/unifra-apisix/apisix/plugins
 
-STOPSIGNAL SIGQUIT
+# Copy configuration files
+COPY --chmod=644 conf /opt/unifra-apisix/conf
+
+# Ensure directories are readable
+RUN chmod 755 /opt/unifra-apisix \
+    /opt/unifra-apisix/unifra \
+    /opt/unifra-apisix/unifra/jsonrpc \
+    /opt/unifra-apisix/unifra/control_plane \
+    /opt/unifra-apisix/apisix \
+    /opt/unifra-apisix/apisix/plugins \
+    /opt/unifra-apisix/conf 2>/dev/null || true
+
+# Switch back to apisix user
+USER apisix
+
+# The config.yaml must set extra_lua_path to load these plugins:
+#   apisix:
+#     extra_lua_path: "/opt/unifra-apisix/?.lua"

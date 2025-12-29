@@ -1,0 +1,77 @@
+#
+# Unifra APISIX Configuration
+#
+# This config enables Unifra plugins for blockchain JSON-RPC gateway
+#
+
+apisix:
+  node_listen: 9080
+  enable_ipv6: false
+  enable_admin: true
+
+  # CRITICAL: Load Unifra plugins from mounted path
+  extra_lua_path: "/opt/unifra-apisix/?.lua"
+
+# Enable plugins (order matters for execution)
+plugins:
+  # --- Unifra Plugins ---
+  - unifra-jsonrpc-var     # Parse JSON-RPC, set context variables
+  - unifra-guard           # Security checks
+  - unifra-ctx-var         # Consumer context injection
+  - unifra-whitelist       # Method access control
+  - unifra-calculate-cu    # Compute unit calculation
+  - unifra-limit-monthly-cu # Monthly quota enforcement
+  - unifra-limit-cu        # Per-second rate limiting
+  - unifra-ws-jsonrpc-proxy # WebSocket JSON-RPC proxy
+
+  # --- APISIX Built-in Plugins ---
+  - proxy-rewrite
+  - key-auth
+  - prometheus
+  - http-logger
+
+# etcd configuration
+deployment:
+  role: traditional
+  role_traditional:
+    config_provider: etcd
+  etcd:
+    host:
+      - "http://etcd:2379"
+    prefix: "/apisix"
+    timeout: 30
+  admin:
+    admin_key:
+      - name: admin
+        key: unifra-admin-key-change-me  # CHANGE THIS IN PRODUCTION!
+        role: admin
+    # Restrict admin API access in production
+    allow_admin:
+      - 0.0.0.0/0  # Allow all for development, restrict in production
+
+# Logging
+nginx_config:
+  error_log_level: warn
+  http:
+    access_log: "/dev/stdout"
+    access_log_format: |
+      {"time": "$time_iso8601", "client": "$remote_addr", "method": "$request_method", "uri": "$uri", "status": $status, "size": $body_bytes_sent, "latency": $request_time}
+
+# Plugin attributes
+plugin_attr:
+  prometheus:
+    export_uri: /apisix/prometheus/metrics
+    export_addr:
+      ip: 0.0.0.0
+      port: 9091
+
+  # Unifra plugin defaults
+  unifra-limit-cu:
+    redis_host: redis
+    redis_port: 6379
+    redis_timeout: 100
+
+  unifra-limit-monthly-cu:
+    redis_host: redis
+    redis_port: 6379
+    redis_timeout: 100
