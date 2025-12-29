@@ -9,7 +9,6 @@ env:
   REGISTRY: ghcr.io/unifralabs/apisix
 
 jobs:
-  # Job 1: Package and release plugin tarball
   release-plugins:
     name: Release Plugin Package
     runs-on: ubuntu-latest
@@ -31,103 +30,29 @@ jobs:
           VERSION=${{ steps.get_version.outputs.VERSION }}
           PACKAGE_NAME="unifra-apisix-plugins-${VERSION}"
 
-          # Create package directory with correct structure
           mkdir -p "${PACKAGE_NAME}/apisix/plugins"
 
-          # Copy plugin files (matching the path structure APISIX expects)
           cp -r unifra "${PACKAGE_NAME}/"
           cp -r apisix/plugins/* "${PACKAGE_NAME}/apisix/plugins/"
           cp -r conf "${PACKAGE_NAME}/" 2>/dev/null || true
 
-          # Create install script
-          cat > "${PACKAGE_NAME}/install.sh" << 'INSTALL_EOF'
-#!/bin/bash
-# Unifra APISIX Plugins Installer
-set -e
-
-INSTALL_DIR="${1:-/opt/unifra-apisix}"
-
-echo "Installing Unifra APISIX plugins to ${INSTALL_DIR}..."
-
-mkdir -p "${INSTALL_DIR}/apisix/plugins"
-cp -r unifra "${INSTALL_DIR}/"
-cp -r apisix/plugins/* "${INSTALL_DIR}/apisix/plugins/"
-cp -r conf "${INSTALL_DIR}/" 2>/dev/null || true
-
-echo ""
-echo "Installation complete!"
-echo ""
-echo "Add to your APISIX config.yaml:"
-echo "  apisix:"
-echo "    extra_lua_path: \"${INSTALL_DIR}/?.lua\""
-echo ""
-echo "Enable plugins:"
-echo "  plugins:"
-echo "    - unifra-jsonrpc-var"
-echo "    - unifra-ctx-var"
-echo "    - unifra-whitelist"
-echo "    - unifra-calculate-cu"
-echo "    - unifra-limit-cu"
-echo "    - unifra-limit-monthly-cu"
-INSTALL_EOF
+          echo '#!/bin/bash' > "${PACKAGE_NAME}/install.sh"
+          echo 'set -e' >> "${PACKAGE_NAME}/install.sh"
+          echo 'INSTALL_DIR="${1:-/opt/unifra-apisix}"' >> "${PACKAGE_NAME}/install.sh"
+          echo 'mkdir -p "${INSTALL_DIR}/apisix/plugins"' >> "${PACKAGE_NAME}/install.sh"
+          echo 'cp -r unifra "${INSTALL_DIR}/"' >> "${PACKAGE_NAME}/install.sh"
+          echo 'cp -r apisix/plugins/* "${INSTALL_DIR}/apisix/plugins/"' >> "${PACKAGE_NAME}/install.sh"
+          echo 'cp -r conf "${INSTALL_DIR}/" 2>/dev/null || true' >> "${PACKAGE_NAME}/install.sh"
+          echo 'echo "Installed to ${INSTALL_DIR}. Set extra_lua_path in config.yaml."' >> "${PACKAGE_NAME}/install.sh"
           chmod +x "${PACKAGE_NAME}/install.sh"
 
-          # Create README
-          cat > "${PACKAGE_NAME}/README.md" << 'README_EOF'
-# Unifra APISIX Plugins
+          echo '# Unifra APISIX Plugins' > "${PACKAGE_NAME}/README.md"
+          echo '' >> "${PACKAGE_NAME}/README.md"
+          echo 'Install: `./install.sh /opt/unifra-apisix`' >> "${PACKAGE_NAME}/README.md"
+          echo '' >> "${PACKAGE_NAME}/README.md"
+          echo 'Config: `extra_lua_path: "/opt/unifra-apisix/?.lua"`' >> "${PACKAGE_NAME}/README.md"
 
-Zero-intrusion plugins for Apache APISIX to build blockchain JSON-RPC gateways.
-
-## Quick Install
-
-```bash
-./install.sh /opt/unifra-apisix
-```
-
-## Manual Install
-
-1. Extract and copy to your APISIX server:
-   ```bash
-   cp -r unifra /opt/unifra-apisix/
-   cp -r apisix /opt/unifra-apisix/
-   cp -r conf /opt/unifra-apisix/
-   ```
-
-2. Update APISIX config.yaml:
-   ```yaml
-   apisix:
-     extra_lua_path: "/opt/unifra-apisix/?.lua"
-
-   plugins:
-     - unifra-jsonrpc-var
-     - unifra-ctx-var
-     - unifra-whitelist
-     - unifra-calculate-cu
-     - unifra-limit-cu
-     - unifra-limit-monthly-cu
-   ```
-
-3. Reload APISIX:
-   ```bash
-   apisix reload
-   ```
-
-## Docker Usage
-
-```yaml
-services:
-  apisix:
-    image: apache/apisix:3.14.0-debian
-    volumes:
-      - ./unifra-apisix-plugins:/opt/unifra-apisix:ro
-      - ./config.yaml:/usr/local/apisix/conf/config.yaml:ro
-```
-README_EOF
-
-          # Create tarball
           tar -czvf "${PACKAGE_NAME}.tar.gz" "${PACKAGE_NAME}"
-
-          echo "Created ${PACKAGE_NAME}.tar.gz"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
@@ -137,7 +62,6 @@ README_EOF
           draft: false
           prerelease: ${{ contains(github.ref, 'beta') || contains(github.ref, 'alpha') || contains(github.ref, 'rc') }}
 
-  # Job 2: Build convenience Docker image
   build-docker:
     name: Build Docker Image
     runs-on: ubuntu-latest
