@@ -427,3 +427,76 @@ end
 - Cache is **not persistent** across requests
 - **Tables in cache** work but should be read-only
 - **nginx variables** (`$remote_addr`, etc.) still accessible
+
+---
+
+## Quota Architecture
+
+### Shared Quota Model
+
+Multiple API keys (apps) belonging to the same user can share a single monthly quota using `quota_key`:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                   User Quota Sharing Architecture               │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  User A (quota_key = "user-a-uuid")                             │
+│  ├── App 1: apikey-1 ─┐                                         │
+│  ├── App 2: apikey-2 ─┼──→ Redis: quota:monthly:user-a-uuid:*   │
+│  └── App 3: apikey-3 ─┘         └── Shared 10,000,000 CU        │
+│                                                                 │
+│  User B (quota_key = "user-b-uuid")                             │
+│  └── App 1: apikey-4 ────→ Redis: quota:monthly:user-b-uuid:*   │
+│                                   └── Own 5,000,000 CU          │
+│                                                                 │
+│  Legacy User (no quota_key)                                     │
+│  └── apikey-5 ───────────→ Redis: quota:monthly:apikey-5:*      │
+│                                   └── Uses consumer_name        │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Redis Key Structure
+
+| Purpose | Key Format | Type | Expiry |
+|---------|-----------|------|--------|
+| Monthly quota | `quota:monthly:{quota_key}:{YYYYMM}` | String | EXPIREAT end of month |
+| Per-second rate | `ratelimit:cu:sliding:{consumer}` | ZSet | Sliding window |
+| Per-second CU values | `ratelimit:cu:sliding:{consumer}:values` | Hash | Sliding window |
+
+**Note**: Monthly quota uses `quota_key` (shared), while per-second rate limiting uses `consumer_name` (per API key).
+
+### Consumer Configuration
+
+```json
+{
+  "username": "apikey-1",
+  "plugins": {
+    "key-auth": { "key": "apikey-1" },
+    "unifra-ctx-var": {
+      "quota_key": "user-a-uuid",
+      "monthly_quota": "10000000",
+      "seconds_quota": "100"
+    }
+  }
+}
+```
+
+### Dashboard Integration
+
+External dashboards can query user usage directly from Redis:
+
+```python
+def get_user_usage(user_id: str) -> dict:
+    cycle_id = datetime.now().strftime("%Y%m")  # e.g., "202512"
+    key = f"quota:monthly:{user_id}:{cycle_id}"
+    used = int(redis.get(key) or 0)
+    return {"user_id": user_id, "cycle": cycle_id, "used": used}
+```
+
+Or via Prometheus metrics:
+```
+unifra_consumer_monthly_used{consumer="user-a-uuid"} 850000
+unifra_consumer_monthly_quota{consumer="user-a-uuid"} 10000000
+```
