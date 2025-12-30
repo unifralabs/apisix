@@ -8,6 +8,7 @@
 #   2. Extract: tar -xzf unifra-apisix-plugins-*.tar.gz
 #   3. Update config.yaml with your settings
 #   4. docker-compose up -d
+#   5. Access Dashboard: http://localhost:9000 (admin/admin)
 #
 
 services:
@@ -71,6 +72,19 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+    networks:
+      - unifra-net
+
+  # APISIX Dashboard - Web UI for managing APISIX
+  dashboard:
+    image: apache/apisix-dashboard:3.0.1-alpine
+    container_name: unifra-dashboard
+    depends_on:
+      - apisix
+    ports:
+      - "9000:9000"   # Dashboard Web UI
+    volumes:
+      - ./dashboard.yaml:/usr/local/apisix-dashboard/conf/conf.yaml:ro
     networks:
       - unifra-net
 
