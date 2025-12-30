@@ -23,6 +23,7 @@ plugins:
   # Unifra Custom Plugins
   # ================================
   # IMPORTANT: Order matters - plugins run by priority (higher = earlier)
+  - unifra-key-auth         # Priority: 27000 - Extract API key from URL path
   - unifra-jsonrpc-var      # Priority: 26000 - Parse JSON-RPC, inject variables
   - unifra-ctx-var          # Priority: 24000 - Inject consumer variables (quota, etc.)
   - unifra-whitelist        # Priority: 1900  - Method access control

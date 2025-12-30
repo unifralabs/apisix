@@ -13,7 +13,8 @@ local _M = {
 }
 
 -- zlib FFI definitions
-ffi.cdef[[
+-- Use pcall to avoid "attempt to redefine" error in multi-worker environments
+pcall(ffi.cdef, [[
     typedef void* voidp;
     typedef unsigned int uInt;
     typedef unsigned long uLong;
@@ -48,7 +49,7 @@ ffi.cdef[[
 
     uLong compressBound(uLong sourceLen);
     const char* zlibVersion(void);
-]]
+]])
 
 -- Load zlib library
 local zlib = ffi.load("z")

@@ -15,6 +15,7 @@ apisix:
 # Enable plugins (order matters for execution)
 plugins:
   # --- Unifra Plugins ---
+  - unifra-key-auth        # Extract API key from URL path
   - unifra-jsonrpc-var
   - unifra-ctx-var
   - unifra-whitelist
