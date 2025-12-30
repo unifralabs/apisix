@@ -1,0 +1,55 @@
+#
+# APISIX Dashboard Configuration - Staging Environment
+#
+
+conf:
+  listen:
+    host: 0.0.0.0
+    port: 9000
+  etcd:
+    endpoints:
+      - etcd:2379
+    prefix: "/apisix"
+  log:
+    error_log:
+      level: info
+      file_path: /dev/stderr
+    access_log:
+      file_path: /dev/stdout
+
+authentication:
+  secret: ${DASHBOARD_SECRET:-staging-dashboard-secret-change-me}
+  expire_time: 3600
+  users:
+    - username: admin
+      password: ${DASHBOARD_PASSWORD:-staging-admin-change-me}
+
+plugins:
+  # APISIX built-in plugins
+  - api-breaker
+  - basic-auth
+  - cors
+  - fault-injection
+  - hmac-auth
+  - http-logger
+  - ip-restriction
+  - jwt-auth
+  - key-auth
+  - limit-conn
+  - limit-count
+  - limit-req
+  - prometheus
+  - proxy-cache
+  - proxy-rewrite
+  - redirect
+  - request-id
+  - response-rewrite
+  # Unifra plugins
+  - unifra-jsonrpc-var
+  - unifra-guard
+  - unifra-ctx-var
+  - unifra-whitelist
+  - unifra-calculate-cu
+  - unifra-limit-monthly-cu
+  - unifra-limit-cu
+  - unifra-ws-jsonrpc-proxy

@@ -1,0 +1,91 @@
+#
+# Unifra APISIX - Staging Environment
+#
+# Staging deployment with staging-specific configurations
+#
+# Domain pattern: staging-{network}.unifra.io
+# Example: staging-eth-mainnet.unifra.io
+#
+# Quick Start:
+#   1. Copy and customize config.yaml
+#   2. docker-compose up -d
+#   3. Configure routes via Admin API or Dashboard
+#
+
+services:
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.11
+    container_name: staging-etcd
+    command:
+      - /usr/local/bin/etcd
+      - --advertise-client-urls=http://etcd:2379
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --data-dir=/etcd-data
+    volumes:
+      - etcd-data:/etcd-data
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - staging-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: staging-redis
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - staging-net
+
+  apisix:
+    image: ghcr.io/unifralabs/apisix:latest
+    container_name: staging-apisix
+    depends_on:
+      etcd:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "9080:9080"   # HTTP proxy
+      - "9443:9443"   # HTTPS proxy
+      - "9180:9180"   # Admin API (restrict via firewall!)
+    volumes:
+      - ./config.yaml:/usr/local/apisix/conf/config.yaml:ro
+    environment:
+      - APISIX_ENV=staging
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /usr/local/apisix/logs/nginx.pid"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - staging-net
+
+  dashboard:
+    image: apache/apisix-dashboard:3.0.1-alpine
+    container_name: staging-dashboard
+    depends_on:
+      - apisix
+    ports:
+      - "9000:9000"   # Dashboard Web UI
+    volumes:
+      - ./dashboard.yaml:/usr/local/apisix-dashboard/conf/conf.yaml:ro
+      - ../docker/schema.json:/usr/local/apisix-dashboard/conf/schema.json:ro
+    networks:
+      - staging-net
+
+volumes:
+  etcd-data:
+  redis-data:
+
+networks:
+  staging-net:
+    driver: bridge
