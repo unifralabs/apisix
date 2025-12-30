@@ -45,10 +45,15 @@ services:
       - unifra-net
 
   apisix:
-    # Option 1: Use pre-built Unifra image (recommended)
-    image: ghcr.io/unifralabs/apisix:latest
+    # Option 1: Use pre-built Unifra image (recommended for production)
+    # image: ghcr.io/unifralabs/apisix:latest
 
-    # Option 2: Use official APISIX with volume mounts (most flexible)
+    # Option 2: Build locally (for development/testing)
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile
+
+    # Option 3: Use official APISIX with volume mounts (most flexible)
     # image: apache/apisix:3.14.0-debian
     # volumes:
     #   - ./unifra-plugins/unifra:/opt/unifra-apisix/unifra:ro
@@ -68,7 +73,7 @@ services:
     volumes:
       - ./config.yaml:/usr/local/apisix/conf/config.yaml:ro
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:9080/apisix/status"]
+      test: ["CMD-SHELL", "test -f /usr/local/apisix/logs/nginx.pid"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -85,6 +90,8 @@ services:
       - "9000:9000"   # Dashboard Web UI
     volumes:
       - ./dashboard.yaml:/usr/local/apisix-dashboard/conf/conf.yaml:ro
+      # Schema with Unifra plugin definitions (run sync-schema.sh to update)
+      - ./schema.json:/usr/local/apisix-dashboard/conf/schema.json:ro
     networks:
       - unifra-net
 

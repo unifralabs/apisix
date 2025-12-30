@@ -32,7 +32,7 @@ This package provides custom plugins and modules for running a blockchain JSON-R
 
 ```bash
 # Clone this repo and mount it
-git clone https://github.com/unifra/unifra-apisix.git
+git clone https://github.com/unifralabs/unifra-apisix.git
 cd unifra-apisix
 
 # Or copy to /opt (for production)
