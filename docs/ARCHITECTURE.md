@@ -202,7 +202,7 @@ Request arrives
 ┌─────────────────────────────────────────────────────────────────┐
 │  unifra-ctx-var (24000)                                         │
 │  - Inject consumer-specific variables                           │
-│  - Set seconds_quota, monthly_quota, monthly_used               │
+│  - Set seconds_quota, monthly_quota, quota_key                  │
 └─────────────────────────────────────────────────────────────────┘
       │
       ▼

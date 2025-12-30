@@ -160,9 +160,9 @@ Injects consumer-specific variables into `ctx.var`. This plugin is typically con
       "type": "string",
       "description": "Monthly CU quota"
     },
-    "monthly_used": {
+    "quota_key": {
       "type": "string",
-      "description": "Currently used CU this month"
+      "description": "Quota key for shared quotas (e.g., user_id). Multiple API keys with the same quota_key share the same monthly quota."
     }
   },
   "additionalProperties": {
@@ -184,18 +184,50 @@ Injects consumer-specific variables into `ctx.var`. This plugin is typically con
     "unifra-ctx-var": {
       "seconds_quota": "100",
       "monthly_quota": "10000000",
-      "monthly_used": "500000"
+      "quota_key": "user-a-uuid"
     }
   }
 }
 ```
+
+### Shared Quota (Multiple API Keys per User)
+
+When a user has multiple API keys (apps), they can share the same monthly quota by setting the same `quota_key`:
+
+```json
+// App 1 - API Key 1
+{
+  "username": "apikey-1",
+  "plugins": {
+    "key-auth": { "key": "apikey-1" },
+    "unifra-ctx-var": {
+      "quota_key": "user-a-uuid",
+      "monthly_quota": "10000000"
+    }
+  }
+}
+
+// App 2 - API Key 2 (same user)
+{
+  "username": "apikey-2",
+  "plugins": {
+    "key-auth": { "key": "apikey-2" },
+    "unifra-ctx-var": {
+      "quota_key": "user-a-uuid",
+      "monthly_quota": "10000000"
+    }
+  }
+}
+```
+
+Both API keys will share the 10,000,000 CU monthly quota. Redis key: `quota:monthly:user-a-uuid:{YYYYMM}`
 
 ### Injected Variables
 
 After this plugin runs, subsequent plugins can access:
 - `ctx.var.seconds_quota` → "100"
 - `ctx.var.monthly_quota` → "10000000"
-- `ctx.var.monthly_used` → "500000"
+- `ctx.var.quota_key` → "user-a-uuid"
 
 ### Dynamic Variables
 
@@ -440,26 +472,32 @@ Enforces monthly CU quotas per consumer.
 {
   "type": "object",
   "properties": {
+    "quota_var": {
+      "type": "string",
+      "default": "monthly_quota",
+      "description": "Variable name containing monthly quota"
+    },
+    "quota_key_var": {
+      "type": "string",
+      "default": "quota_key",
+      "description": "Variable name for quota key (user_id for shared quotas). Falls back to consumer_name if not set."
+    },
     "redis_host": { "type": "string", "default": "127.0.0.1" },
     "redis_port": { "type": "integer", "default": 6379 },
     "redis_password": { "type": "string", "default": "" },
     "redis_database": { "type": "integer", "default": 0 },
-    "redis_timeout": { "type": "integer", "default": 1000 },
-    "allow_degradation": {
-      "type": "boolean",
-      "default": true,
-      "description": "Allow requests when Redis is unavailable"
-    }
+    "redis_timeout": { "type": "integer", "default": 1000 }
   }
 }
 ```
 
 ### How It Works
 
-1. Reads `monthly_quota` and `monthly_used` from `ctx.var`
-2. Adds current request's CU (`ctx.var.cu`)
-3. If `monthly_used + cu > monthly_quota`, rejects request
-4. Otherwise, increments usage in Redis
+1. Reads `monthly_quota` from `ctx.var`
+2. Gets `quota_key` from `ctx.var` (falls back to `consumer_name` if not set)
+3. Gets current usage from Redis: `quota:monthly:{quota_key}:{YYYYMM}`
+4. If `current_usage + cu > monthly_quota`, rejects request
+5. Otherwise, atomically increments usage in Redis
 
 ### Error Response
 

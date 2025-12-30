@@ -5,14 +5,15 @@
 -- Used primarily in Consumer configs to set quota variables like:
 -- - seconds_quota: CU limit per second
 -- - monthly_quota: Monthly CU limit
--- - monthly_used: Current monthly usage
+-- - quota_key: Shared quota key (user_id) for multiple API keys per user
 --
 -- Example Consumer config:
 -- {
 --   "plugins": {
 --     "unifra-ctx-var": {
 --       "seconds_quota": "100",
---       "monthly_quota": "1000000"
+--       "monthly_quota": "1000000",
+--       "quota_key": "user-uuid-123"
 --     }
 --   }
 -- }

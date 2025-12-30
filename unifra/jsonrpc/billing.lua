@@ -22,11 +22,11 @@ local _M = {
 
 
 --- Generate Redis key for billing cycle
--- @param consumer_name string Consumer name
+-- @param quota_key string Quota key (user_id or consumer_name for shared quotas)
 -- @param cycle_id string Cycle ID from control plane
 -- @return string Redis key
-function _M.make_key(consumer_name, cycle_id)
-    return string.format("quota:monthly:%s:%s", consumer_name, cycle_id or "default")
+function _M.make_key(quota_key, cycle_id)
+    return string.format("quota:monthly:%s:%s", quota_key, cycle_id or "default")
 end
 
 
@@ -83,14 +83,14 @@ end
 --- Check and increment monthly quota atomically
 -- @param redis_conf table Redis configuration
 -- @param ctx table Request context
--- @param consumer_name string Consumer name
+-- @param quota_key string Quota key (user_id for shared quotas, or consumer_name)
 -- @param cu number CU to consume
 -- @param limit number Monthly quota limit
 -- @return boolean|nil allowed true if allowed, false if exceeded, nil on error
 -- @return number|nil used Current usage after increment (if allowed) or before (if rejected)
 -- @return number|nil remaining Remaining quota
 -- @return string|nil error Error message
-function _M.check_and_increment(redis_conf, ctx, consumer_name, cu, limit)
+function _M.check_and_increment(redis_conf, ctx, quota_key, cu, limit)
     -- Get cycle information
     local cycle_id, cycle_end_at, err = _M.get_cycle_info(ctx)
     if err then
@@ -99,7 +99,7 @@ function _M.check_and_increment(redis_conf, ctx, consumer_name, cu, limit)
     end
 
     -- Generate Redis key
-    local key = _M.make_key(consumer_name, cycle_id)
+    local key = _M.make_key(quota_key, cycle_id)
 
     -- Execute atomic script via circuit breaker
     local redis = require("resty.redis")
@@ -157,7 +157,7 @@ function _M.check_and_increment(redis_conf, ctx, consumer_name, cu, limit)
 
     -- Handle circuit breaker block
     if blocked then
-        core.log.error("Circuit breaker blocked monthly quota check for ", consumer_name)
+        core.log.error("Circuit breaker blocked monthly quota check for ", quota_key)
         -- Fail-closed: reject request to prevent overselling
         return nil, nil, nil, "monthly quota service unavailable (circuit breaker open)"
     end
@@ -188,7 +188,7 @@ function _M.check_and_increment(redis_conf, ctx, consumer_name, cu, limit)
 
     if not allowed then
         metrics.inc_quota_exceeded(ctx)
-        core.log.warn("Monthly quota exceeded: consumer=", consumer_name,
+        core.log.warn("Monthly quota exceeded: quota_key=", quota_key,
                      ", used=", used, ", limit=", limit, ", cycle=", cycle_id)
     end
 
@@ -199,16 +199,16 @@ end
 --- Get current monthly usage
 -- @param redis_conf table Redis configuration
 -- @param ctx table Request context
--- @param consumer_name string Consumer name
+-- @param quota_key string Quota key (user_id for shared quotas, or consumer_name)
 -- @return number|nil used Current usage (0 if not found)
 -- @return string|nil error Error message
-function _M.get_current_usage(redis_conf, ctx, consumer_name)
+function _M.get_current_usage(redis_conf, ctx, quota_key)
     local cycle_id, cycle_end_at, err = _M.get_cycle_info(ctx)
     if err then
         return nil, err
     end
 
-    local key = _M.make_key(consumer_name, cycle_id)
+    local key = _M.make_key(quota_key, cycle_id)
 
     -- Execute via circuit breaker
     local result, script_err, blocked = redis_circuit_breaker.execute(
@@ -261,19 +261,19 @@ function _M.get_current_usage(redis_conf, ctx, consumer_name)
 end
 
 
---- Reset quota for a consumer (for testing or refunds)
+--- Reset quota for a user/consumer (for testing or refunds)
 -- @param redis_conf table Redis configuration
 -- @param ctx table Request context
--- @param consumer_name string Consumer name
+-- @param quota_key string Quota key (user_id for shared quotas, or consumer_name)
 -- @return boolean|nil success
 -- @return string|nil error Error message
-function _M.reset_quota(redis_conf, ctx, consumer_name)
+function _M.reset_quota(redis_conf, ctx, quota_key)
     local cycle_id, _, err = _M.get_cycle_info(ctx)
     if err then
         return nil, err
     end
 
-    local key = _M.make_key(consumer_name, cycle_id)
+    local key = _M.make_key(quota_key, cycle_id)
 
     local redis = require("resty.redis")
     local red = redis:new()
@@ -299,7 +299,7 @@ function _M.reset_quota(redis_conf, ctx, consumer_name)
         return nil, "redis del failed: " .. del_err
     end
 
-    core.log.info("Reset quota for consumer: ", consumer_name, ", cycle: ", cycle_id)
+    core.log.info("Reset quota for quota_key: ", quota_key, ", cycle: ", cycle_id)
     return true, nil
 end
 

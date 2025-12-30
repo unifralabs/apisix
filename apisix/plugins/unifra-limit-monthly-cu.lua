@@ -22,6 +22,11 @@ local schema = {
             default = "monthly_quota",
             description = "Variable name containing monthly quota"
         },
+        quota_key_var = {
+            type = "string",
+            default = "quota_key",
+            description = "Variable name for quota key (user_id for shared quotas). Falls back to consumer_name if not set."
+        },
         -- Redis configuration for atomic quota tracking
         redis_host = {
             type = "string",
@@ -76,11 +81,21 @@ function _M.access(conf, ctx)
         return
     end
 
-    -- Get consumer name
+    -- Get consumer name (required for fallback)
     local consumer_name = ctx.var.consumer_name
     if not consumer_name then
         core.log.warn("No consumer name available for monthly quota check")
         return
+    end
+
+    -- Get quota_key: use configured variable, fallback to consumer_name
+    -- This allows multiple API keys (consumers) to share a single user's quota
+    local quota_key = ctx.var[conf.quota_key_var]
+    if not quota_key or quota_key == "" then
+        quota_key = consumer_name
+        core.log.debug("quota_key not set, using consumer_name: ", consumer_name)
+    else
+        core.log.debug("Using quota_key for shared quota: ", quota_key)
     end
 
     -- Get CU for this request
@@ -99,7 +114,7 @@ function _M.access(conf, ctx)
     local allowed, used, remaining, err = billing.check_and_increment(
         redis_conf,
         ctx,
-        consumer_name,
+        quota_key,
         cu,
         quota
     )
