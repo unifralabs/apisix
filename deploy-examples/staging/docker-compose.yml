@@ -46,7 +46,13 @@ services:
       - staging-net
 
   apisix:
-    image: ghcr.io/unifralabs/apisix:latest
+    # Use pre-built image (after CI publishes it)
+    # image: ghcr.io/unifralabs/apisix:latest
+
+    # For testing: build locally
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile
     container_name: staging-apisix
     depends_on:
       etcd:

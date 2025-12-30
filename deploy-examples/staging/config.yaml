@@ -43,7 +43,7 @@ deployment:
   admin:
     admin_key:
       - name: admin
-        key: ${APISIX_ADMIN_KEY:-staging-admin-key-change-me}
+        key: staging-admin-key-change-me  # Change in production!
         role: admin
     # Restrict admin API access
     allow_admin:

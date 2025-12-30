@@ -18,11 +18,11 @@ conf:
       file_path: /dev/stdout
 
 authentication:
-  secret: ${DASHBOARD_SECRET:-staging-dashboard-secret-change-me}
+  secret: staging-dashboard-secret-change-me  # Change in production!
   expire_time: 3600
   users:
     - username: admin
-      password: ${DASHBOARD_PASSWORD:-staging-admin-change-me}
+      password: staging-admin-change-me  # Change in production!
 
 plugins:
   # APISIX built-in plugins
