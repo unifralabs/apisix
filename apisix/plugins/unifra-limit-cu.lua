@@ -9,10 +9,8 @@
 
 local core = require("apisix.core")
 local jsonrpc = require("unifra.jsonrpc.core")
-local ratelimit = require("unifra.jsonrpc.ratelimit")
 local redis_scripts = require("unifra.jsonrpc.redis_scripts")
 local redis_circuit_breaker = require("unifra.jsonrpc.redis_circuit_breaker")
-local feature_flags = require("unifra.feature_flags")
 local errors = require("unifra.jsonrpc.errors")
 local metrics = require("unifra.metrics")
 
@@ -118,16 +116,8 @@ function _M.access(conf, ctx)
         key_value = ctx.var.remote_addr
     end
 
-    -- Check if sliding window is enabled
-    local use_sliding_window = feature_flags.is_enabled(ctx, "sliding_window_rate_limit")
-
-    if use_sliding_window then
-        -- Use new sliding window algorithm
-        return _M.sliding_window_check(conf, ctx, cu, limit, key_value)
-    else
-        -- Use legacy fixed window algorithm
-        return _M.fixed_window_check(conf, ctx, cu, limit, key_value)
-    end
+    -- Use sliding window algorithm
+    return _M.sliding_window_check(conf, ctx, cu, limit, key_value)
 end
 
 
@@ -252,70 +242,6 @@ function _M.sliding_window_check(conf, ctx, cu, limit, key_value)
     end
 
     core.log.debug("rate limit passed (sliding): key=", key_value,
-                   ", remaining=", remaining, "/", limit)
-end
-
-
---- Fixed window rate limiting (legacy, deprecated)
-function _M.fixed_window_check(conf, ctx, cu, limit, key_value)
-    local redis_conf = {
-        host = conf.redis_host,
-        port = conf.redis_port,
-        password = conf.redis_password,
-        database = conf.redis_database,
-        timeout = conf.redis_timeout,
-    }
-
-    -- Generate rate limit key (includes time bucket)
-    local key = ratelimit.make_key(key_value, conf.time_window)
-
-    -- Check rate limit (legacy implementation)
-    local allowed, remaining, err = ratelimit.check_and_incr(
-        redis_conf, key, cu, limit, conf.time_window
-    )
-
-    if err then
-        core.log.error("rate limit redis error (fixed): ", err)
-
-        if conf.allow_degradation then
-            core.log.warn("rate limit degradation (fixed): allowing request")
-            return
-        else
-            return errors.response(
-                ctx,
-                errors.ERR_INTERNAL,
-                "rate limiting service unavailable",
-                ctx.jsonrpc and ctx.jsonrpc.ids and ctx.jsonrpc.ids[1]
-            )
-        end
-    end
-
-    -- Set rate limit headers
-    if conf.show_limit_header then
-        core.response.set_header("X-RateLimit-Limit", limit)
-        core.response.set_header("X-RateLimit-Remaining", remaining or 0)
-        core.response.set_header("X-RateLimit-Reset", conf.time_window)
-        core.response.set_header("X-RateLimit-Type", "fixed")
-    end
-
-    if not allowed then
-        metrics.inc_rate_limit(ctx, "second")
-
-        core.log.warn("rate limit exceeded (fixed): key=", key_value,
-                      ", limit=", limit, ", cu=", cu)
-
-        return errors.response(
-            ctx,
-            errors.ERR_RATE_LIMITED,
-            conf.rejected_msg,
-            ctx.jsonrpc and ctx.jsonrpc.ids and ctx.jsonrpc.ids[1],
-            {
-                ["Retry-After"] = conf.time_window,
-            }
-        )
-    end
-
-    core.log.debug("rate limit passed (fixed): key=", key_value,
                    ", remaining=", remaining, "/", limit)
 end
 

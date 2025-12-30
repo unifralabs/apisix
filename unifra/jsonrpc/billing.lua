@@ -14,7 +14,6 @@
 local core = require("apisix.core")
 local redis_scripts = require("unifra.jsonrpc.redis_scripts")
 local redis_circuit_breaker = require("unifra.jsonrpc.redis_circuit_breaker")
-local feature_flags = require("unifra.feature_flags")
 local metrics = require("unifra.metrics")
 
 local _M = {
@@ -37,62 +36,47 @@ end
 -- @return number|nil cycle_end_at Cycle end timestamp (unix seconds)
 -- @return string|nil error Error message
 function _M.get_cycle_info(ctx)
-    -- Check if control plane billing is enabled
-    local use_cp_billing = feature_flags.is_enabled(ctx, "control_plane_billing")
+    -- Generate cycle_id from current date (UTC natural month)
+    local date = os.date("!*t")  -- UTC
+    local cycle_id = string.format("%04d%02d", date.year, date.month)
 
-    if use_cp_billing then
-        -- Get from consumer configuration (provided by control plane)
-        local cycle_id = ctx.var.billing_cycle_id
-        local cycle_end_at = tonumber(ctx.var.billing_cycle_end_at)
+    -- Calculate end of current month (last second: 23:59:59 UTC)
+    -- CRITICAL: Must use UTC epoch, not local timezone interpretation
 
-        if not cycle_id or not cycle_end_at then
-            return nil, nil, "missing billing cycle information from control plane"
-        end
-
-        return cycle_id, cycle_end_at, nil
-    else
-        -- Fallback: Generate cycle_id from current date (UTC natural month)
-        local date = os.date("!*t")  -- UTC
-        local cycle_id = string.format("%04d%02d", date.year, date.month)
-
-        -- Calculate end of current month (last second: 23:59:59 UTC)
-        -- CRITICAL: Must use UTC epoch, not local timezone interpretation
-
-        -- Calculate next month's first day
-        local next_month = date.month + 1
-        local next_year = date.year
-        if next_month > 12 then
-            next_month = 1
-            next_year = next_year + 1
-        end
-
-        -- Get epoch for next month's first day 00:00:00 in LOCAL timezone
-        local next_month_local = os.time({
-            year = next_year,
-            month = next_month,
-            day = 1,
-            hour = 0,
-            min = 0,
-            sec = 0
-        })
-
-        -- Calculate timezone offset to convert local epoch to UTC epoch
-        -- In UTC+8: local time "2026-01-01 00:00:00 +08:00" = "2025-12-31 16:00:00 UTC"
-        -- We want "2026-01-01 00:00:00 UTC", so need to ADD 8 hours
-        local utc_date = os.date("!*t", next_month_local)
-        local utc_as_local = os.time(utc_date)
-        local tz_offset = next_month_local - utc_as_local
-
-        -- CRITICAL: Add offset (not subtract) to get UTC epoch
-        -- next_month_local represents the date in local timezone
-        -- We need to shift forward by tz_offset to get the same date in UTC
-        local next_month_utc = next_month_local + tz_offset
-
-        -- Current month's last second: next month start - 1 second
-        local cycle_end_at = next_month_utc - 1
-
-        return cycle_id, cycle_end_at, nil
+    -- Calculate next month's first day
+    local next_month = date.month + 1
+    local next_year = date.year
+    if next_month > 12 then
+        next_month = 1
+        next_year = next_year + 1
     end
+
+    -- Get epoch for next month's first day 00:00:00 in LOCAL timezone
+    local next_month_local = os.time({
+        year = next_year,
+        month = next_month,
+        day = 1,
+        hour = 0,
+        min = 0,
+        sec = 0
+    })
+
+    -- Calculate timezone offset to convert local epoch to UTC epoch
+    -- In UTC+8: local time "2026-01-01 00:00:00 +08:00" = "2025-12-31 16:00:00 UTC"
+    -- We want "2026-01-01 00:00:00 UTC", so need to ADD 8 hours
+    local utc_date = os.date("!*t", next_month_local)
+    local utc_as_local = os.time(utc_date)
+    local tz_offset = next_month_local - utc_as_local
+
+    -- CRITICAL: Add offset (not subtract) to get UTC epoch
+    -- next_month_local represents the date in local timezone
+    -- We need to shift forward by tz_offset to get the same date in UTC
+    local next_month_utc = next_month_local + tz_offset
+
+    -- Current month's last second: next month start - 1 second
+    local cycle_end_at = next_month_utc - 1
+
+    return cycle_id, cycle_end_at, nil
 end
 
 

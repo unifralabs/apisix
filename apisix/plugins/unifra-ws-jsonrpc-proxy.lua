@@ -21,7 +21,6 @@ local cu_mod = require("unifra.jsonrpc.cu")
 local redis_scripts = require("unifra.jsonrpc.redis_scripts")
 local redis_circuit_breaker = require("unifra.jsonrpc.redis_circuit_breaker")
 local config_mod = require("unifra.jsonrpc.config")
-local feature_flags = require("unifra.feature_flags")
 local billing = require("unifra.jsonrpc.billing")
 local errors = require("unifra.jsonrpc.errors")
 local metrics = require("unifra.metrics")
@@ -181,43 +180,40 @@ local function check_message(conf, ctx, data)
     -- Calculate CU
     local total_cu = cu_mod.calculate(methods, cu_config)
 
-    -- Monthly quota check (same as HTTP path)
-    local use_monthly_quota = feature_flags.is_enabled(ctx, "atomic_monthly_quota")
-    if use_monthly_quota then
-        local quota = tonumber(ctx.var.monthly_quota)
-        if quota and quota > 0 then
-            local consumer_name = ctx.var.consumer_name
-            if consumer_name then
-                local redis_conf = {
-                    host = conf.redis_host,
-                    port = conf.redis_port,
-                    password = conf.redis_password,
-                    database = conf.redis_database,
-                    timeout = conf.redis_timeout,
-                }
+    -- Monthly quota check (atomic via billing module)
+    local quota = tonumber(ctx.var.monthly_quota)
+    if quota and quota > 0 then
+        local consumer_name = ctx.var.consumer_name
+        if consumer_name then
+            local redis_conf = {
+                host = conf.redis_host,
+                port = conf.redis_port,
+                password = conf.redis_password,
+                database = conf.redis_database,
+                timeout = conf.redis_timeout,
+            }
 
-                local allowed, used, remaining, quota_err = billing.check_and_increment(
-                    redis_conf, ctx, consumer_name, total_cu, quota
+            local allowed, used, remaining, quota_err = billing.check_and_increment(
+                redis_conf, ctx, consumer_name, total_cu, quota
+            )
+
+            if quota_err then
+                core.log.error("ws monthly quota check error: ", quota_err)
+                return 500, jsonrpc.error_response(
+                    jsonrpc.ERROR_INTERNAL,
+                    "monthly quota service unavailable",
+                    result.ids and result.ids[1]
                 )
+            end
 
-                if quota_err then
-                    core.log.error("ws monthly quota check error: ", quota_err)
-                    return 500, jsonrpc.error_response(
-                        jsonrpc.ERROR_INTERNAL,
-                        "monthly quota service unavailable",
-                        result.ids and result.ids[1]
-                    )
-                end
-
-                if not allowed then
-                    core.log.warn("ws monthly quota exceeded: consumer=", consumer_name,
-                                  ", used=", used, ", quota=", quota)
-                    return 429, jsonrpc.error_response(
-                        jsonrpc.ERROR_QUOTA_EXCEEDED,
-                        "monthly quota exceeded",
-                        result.ids and result.ids[1]
-                    )
-                end
+            if not allowed then
+                core.log.warn("ws monthly quota exceeded: consumer=", consumer_name,
+                              ", used=", used, ", quota=", quota)
+                return 429, jsonrpc.error_response(
+                    jsonrpc.ERROR_QUOTA_EXCEEDED,
+                    "monthly quota exceeded",
+                    result.ids and result.ids[1]
+                )
             end
         end
     end
@@ -415,18 +411,13 @@ function _M.access(conf, ctx)
     local conn_opts = { timeout = ws_timeout }
 
     if use_ssl then
-        -- Enable SSL verification for security (was disabled before)
-        local ws_ssl_verify = feature_flags.is_enabled(ctx, "ws_ssl_verify")
-        conn_opts.ssl_verify = ws_ssl_verify
+        -- Enable SSL verification for security
+        conn_opts.ssl_verify = true
 
         -- Set SNI for proper SSL handshake
         local sni = server.domain or server.host
         if sni then
             conn_opts.server_name = sni:match("^([^:]+)")
-        end
-
-        if not ws_ssl_verify then
-            core.log.warn("ws: SSL verification disabled (not recommended for production)")
         end
     end
 

@@ -7,7 +7,6 @@
 --
 
 local cjson = require("cjson.safe")
-local feature_flags = require("unifra.feature_flags")
 
 local _M = {
     version = "1.0.0"

@@ -11,7 +11,6 @@
 --
 
 local core = require("apisix.core")
-local feature_flags = require("unifra.feature_flags")
 
 local _M = {
     version = "1.0.0"
@@ -172,16 +171,9 @@ end
 -- @return string|nil Error message
 -- @return boolean Whether circuit breaker blocked the request
 function _M.execute(redis_conf, ctx, operation, fail_open)
-    -- Check if circuit breaker is enabled
-    if not feature_flags.is_enabled(ctx, "redis_circuit_breaker") then
-        -- Circuit breaker disabled, execute directly
-        local result, err = operation()
-        return result, err, false
-    end
-
-    -- Default to fail-open if not specified
+    -- Default to fail-open
     if fail_open == nil then
-        fail_open = feature_flags.is_enabled(ctx, "fail_open_on_redis_error")
+        fail_open = true
     end
 
     -- Check if request is allowed

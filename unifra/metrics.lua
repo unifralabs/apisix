@@ -6,7 +6,6 @@
 --
 
 local core = require("apisix.core")
-local feature_flags = require("unifra.feature_flags")
 
 -- Optional dependency: resty.prometheus
 local prometheus
@@ -158,13 +157,8 @@ end
 -- @param ctx table Request context (optional)
 -- @return boolean true if enabled
 local function is_enabled(ctx)
-    -- First check if prometheus module is available
-    if not metrics_enabled or not prom then
-        return false
-    end
-
-    -- Then check feature flag
-    return feature_flags.is_enabled(ctx, "prometheus_metrics")
+    -- Check if prometheus module is available and initialized
+    return metrics_enabled and prom ~= nil
 end
 
 

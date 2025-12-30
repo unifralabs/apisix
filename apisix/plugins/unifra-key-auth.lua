@@ -12,7 +12,6 @@
 --
 
 local core = require("apisix.core")
-local feature_flags = require("unifra.feature_flags")
 
 local plugin_name = "unifra-key-auth"
 
@@ -71,11 +70,6 @@ end
 
 
 function _M.rewrite(conf, ctx)
-    -- Check if URL key extraction is enabled
-    if not feature_flags.is_enabled(ctx, "url_key_extraction") then
-        return
-    end
-
     local uri = ctx.var.uri
     local key, remaining_path
 

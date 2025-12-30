@@ -10,7 +10,6 @@
 local core = require("apisix.core")
 local jsonrpc = require("unifra.jsonrpc.core")
 local billing = require("unifra.jsonrpc.billing")
-local feature_flags = require("unifra.feature_flags")
 local errors = require("unifra.jsonrpc.errors")
 
 local plugin_name = "unifra-limit-monthly-cu"
@@ -70,14 +69,6 @@ end
 
 
 function _M.access(conf, ctx)
-    -- Check if atomic monthly quota tracking is enabled
-    local use_atomic = feature_flags.is_enabled(ctx, "atomic_monthly_quota")
-
-    if not use_atomic then
-        -- Fallback to legacy behavior (non-atomic, not recommended)
-        return _M.legacy_access(conf, ctx)
-    end
-
     -- Get monthly quota from consumer configuration
     local quota = tonumber(ctx.var[conf.quota_var])
     if not quota or quota <= 0 then
@@ -142,42 +133,6 @@ function _M.access(conf, ctx)
             }
         )
     end
-end
-
-
--- Legacy non-atomic implementation (deprecated, kept for compatibility)
-function _M.legacy_access(conf, ctx)
-    local quota = tonumber(ctx.var[conf.quota_var])
-    local used = tonumber(ctx.var.monthly_used)  -- This is never set!
-
-    if not quota then
-        return
-    end
-
-    if not used then
-        -- This always happens, so check is always skipped
-        return
-    end
-
-    local cu = tonumber(ctx.var.cu) or 1
-
-    if used + cu > quota then
-        core.log.warn("monthly quota exceeded (legacy): used=", used,
-                      ", quota=", quota, ", cu=", cu)
-
-        core.response.set_header("Content-Type", "application/json")
-        core.response.set_header("X-Monthly-Quota", quota)
-        core.response.set_header("X-Monthly-Used", used)
-
-        return conf.rejected_code, jsonrpc.error_response(
-            jsonrpc.ERROR_QUOTA_EXCEEDED,
-            conf.rejected_msg,
-            ctx.jsonrpc and ctx.jsonrpc.ids and ctx.jsonrpc.ids[1]
-        )
-    end
-
-    core.response.set_header("X-Monthly-Quota", quota)
-    core.response.set_header("X-Monthly-Remaining", quota - used - cu)
 end
 
 

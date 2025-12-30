@@ -13,7 +13,6 @@
 
 local core = require("apisix.core")
 local jsonrpc = require("unifra.jsonrpc.core")
-local feature_flags = require("unifra.feature_flags")
 
 local plugin_name = "unifra-jsonrpc-var"
 
@@ -64,9 +63,8 @@ function _M.rewrite(conf, ctx)
         return
     end
 
-    -- Parse JSON-RPC request
-    local allow_partial = feature_flags.is_enabled(ctx, "fix_jsonrpc_batch_partial")
-    local result, err = jsonrpc.parse(body, allow_partial)
+    -- Parse JSON-RPC request (allow partial batch handling for robustness)
+    local result, err = jsonrpc.parse(body, true)
     if err then
         -- Return JSON-RPC error response
         local code = jsonrpc.ERROR_PARSE

@@ -12,7 +12,6 @@
 
 local core = require("apisix.core")
 local jsonrpc_core = require("unifra.jsonrpc.core")
-local feature_flags = require("unifra.feature_flags")
 
 local _M = {
     version = "1.0.0"
@@ -111,17 +110,6 @@ _M.ERR_INVALID_PARAMS = {
 -- @return number HTTP status code
 -- @return string Response body
 function _M.response(ctx, error_type, custom_message, request_id, headers)
-    local use_unified = feature_flags.is_enabled(ctx, "unified_error_handling")
-
-    if not use_unified then
-        -- Fallback to legacy behavior
-        local message = custom_message or error_type.message
-        return error_type.http_status, jsonrpc_core.error_response(
-            error_type.code, message, request_id
-        )
-    end
-
-    -- Unified error handling
     local message = custom_message or error_type.message
     local http_status = error_type.http_status
     local response_body

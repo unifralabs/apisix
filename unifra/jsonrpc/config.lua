@@ -9,7 +9,6 @@
 --
 
 local core = require("apisix.core")
-local feature_flags = require("unifra.feature_flags")
 
 -- Optional dependency: lyaml (APISIX standard YAML library)
 local yaml
@@ -99,14 +98,6 @@ end
 -- @return table|nil Configuration
 -- @return string|nil Error message
 function _M.load(ctx, config_type, config_path, ttl, force_reload)
-    -- Check if per-route caching is enabled
-    local use_per_route_cache = feature_flags.is_enabled(ctx, "per_route_config_cache")
-
-    if not use_per_route_cache then
-        -- Fallback to direct file loading (backward compatible)
-        return load_yaml_file(config_path)
-    end
-
     -- Get cache key
     local route_id = get_route_id(ctx)
     local cache_key = get_cache_key(route_id, config_type, config_path)
