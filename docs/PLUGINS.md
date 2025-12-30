@@ -37,6 +37,31 @@
 
 Parses incoming JSON-RPC requests and injects parsed data into `ctx.var` for use by subsequent plugins. This is the cornerstone of the zero-intrusion architecture.
 
+### Compression Support
+
+This plugin automatically handles gzip-compressed request bodies:
+
+| Content-Encoding | Handling |
+|-----------------|----------|
+| `gzip` / `x-gzip` | Automatically decompressed before parsing |
+| `deflate` | Automatically decompressed before parsing |
+| `identity` | No processing (raw body) |
+| Other | Returns 415 Unsupported Media Type |
+
+**Example - sending gzip request:**
+```bash
+# Compress the JSON-RPC request
+echo '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' | gzip > request.gz
+
+# Send with Content-Encoding header
+curl -X POST http://localhost:9080/v1/api-key \
+  -H "Content-Type: application/json" \
+  -H "Content-Encoding: gzip" \
+  --data-binary @request.gz
+```
+
+**Security**: Maximum decompressed size is limited to 10MB to prevent zip bomb attacks.
+
 ### Schema
 
 ```json

@@ -9,11 +9,11 @@ This package provides custom plugins and modules for running a blockchain JSON-R
 ### Key Features
 
 - **JSON-RPC Parsing**: Full support for single and batch JSON-RPC 2.0 requests
+- **Gzip Compression**: Automatic request decompression and response compression
 - **Method Whitelist**: Per-network method access control with free/paid tiers
 - **Compute Unit (CU) Based Rate Limiting**: Configurable CU costs per method
 - **Monthly Quota Management**: Track and enforce monthly usage limits
 - **WebSocket Support**: Per-message rate limiting for WebSocket connections
-- **Emergency Circuit Breaker**: Block specific consumers, methods, or IPs
 - **Hot Reload Config**: Whitelist and CU configs auto-reload (configurable TTL)
 
 ## Documentation

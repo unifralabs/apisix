@@ -13,6 +13,7 @@
 
 local core = require("apisix.core")
 local jsonrpc = require("unifra.jsonrpc.core")
+local compression = require("unifra.compression")
 
 local plugin_name = "unifra-jsonrpc-var"
 
@@ -61,6 +62,47 @@ function _M.rewrite(conf, ctx)
     if not body then
         core.log.warn("failed to read request body: ", err)
         return
+    end
+
+    -- Handle gzip-compressed request body (Content-Encoding: gzip)
+    local content_encoding = ctx.var.http_content_encoding
+    if content_encoding then
+        local encoding_lower = content_encoding:lower()
+        if encoding_lower == "gzip" or encoding_lower == "x-gzip" then
+            local decompressed, decomp_err = compression.gunzip(body)
+            if not decompressed then
+                core.log.warn("failed to decompress gzip body: ", decomp_err)
+                core.response.set_header("Content-Type", "application/json")
+                return 400, jsonrpc.error_response(
+                    jsonrpc.ERROR_PARSE,
+                    "failed to decompress gzip body: " .. (decomp_err or "unknown error"),
+                    nil
+                )
+            end
+            body = decompressed
+            core.log.info("decompressed gzip body: ", #body, " bytes")
+        elseif encoding_lower == "deflate" then
+            -- deflate is rarely used, but we should handle it
+            local decompressed, decomp_err = compression.gunzip(body)
+            if not decompressed then
+                core.log.warn("failed to decompress deflate body: ", decomp_err)
+                core.response.set_header("Content-Type", "application/json")
+                return 400, jsonrpc.error_response(
+                    jsonrpc.ERROR_PARSE,
+                    "failed to decompress body: " .. (decomp_err or "unknown error"),
+                    nil
+                )
+            end
+            body = decompressed
+        elseif encoding_lower ~= "identity" then
+            -- Unsupported encoding
+            core.response.set_header("Content-Type", "application/json")
+            return 415, jsonrpc.error_response(
+                jsonrpc.ERROR_PARSE,
+                "unsupported Content-Encoding: " .. content_encoding,
+                nil
+            )
+        end
     end
 
     -- Parse JSON-RPC request (allow partial batch handling for robustness)

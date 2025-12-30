@@ -56,6 +56,15 @@ nginx_config:
     access_log_format: |
       {"time": "$time_iso8601", "client": "$remote_addr", "method": "$request_method", "uri": "$uri", "status": $status, "size": $body_bytes_sent, "latency": $request_time}
 
+    # Enable gzip compression for responses
+    # This uses nginx's native gzip module
+    gzip: "on"
+    gzip_min_length: 256
+    gzip_comp_level: 6
+    gzip_types: "application/json application/javascript text/plain text/css text/xml"
+    gzip_vary: "on"
+    gzip_proxied: "any"
+
 # Plugin attributes
 plugin_attr:
   prometheus:

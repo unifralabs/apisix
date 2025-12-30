@@ -54,7 +54,8 @@ plugins:
 
   # Other
   - cors
-  - gzip
+  # Note: APISIX's gzip plugin requires APISIX-Runtime
+  # Use nginx native gzip instead (see nginx_config below)
 
 # etcd configuration
 deployment:
@@ -74,6 +75,15 @@ nginx_config:
     enable_access_log: true
     access_log: logs/access.log
     access_log_format: '{"time": "$time_iso8601", "remote_addr": "$remote_addr", "request": "$request", "status": $status, "body_bytes_sent": $body_bytes_sent, "request_time": $request_time, "upstream_response_time": "$upstream_response_time"}'
+
+    # Enable gzip compression for responses (nginx native)
+    # This compresses responses when client sends Accept-Encoding: gzip
+    gzip: "on"
+    gzip_min_length: 256
+    gzip_comp_level: 6
+    gzip_types: "application/json application/javascript text/plain text/css text/xml"
+    gzip_vary: "on"
+    gzip_proxied: "any"
 
 # Plugin attributes (global defaults for plugins)
 plugin_attr:

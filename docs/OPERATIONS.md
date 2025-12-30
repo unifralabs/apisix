@@ -4,10 +4,11 @@
 
 1. [Monitoring](#monitoring)
 2. [Logging](#logging)
-3. [Troubleshooting](#troubleshooting)
-4. [Common Issues](#common-issues)
-5. [Maintenance](#maintenance)
-6. [Security](#security)
+3. [Performance](#performance)
+4. [Troubleshooting](#troubleshooting)
+5. [Common Issues](#common-issues)
+6. [Maintenance](#maintenance)
+7. [Security](#security)
 
 ---
 
@@ -190,6 +191,70 @@ Enable HTTP logger plugin for external log aggregation:
   }
 }
 ```
+
+---
+
+## Performance
+
+### Gzip Compression
+
+Unifra APISIX supports gzip compression for both requests and responses:
+
+#### Request Decompression (Automatic)
+
+The `unifra-jsonrpc-var` plugin automatically decompresses gzip-encoded request bodies:
+
+```bash
+# Send gzip-compressed request
+echo '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' | gzip | \
+  curl -X POST http://localhost:9080/v1/api-key \
+    -H "Content-Type: application/json" \
+    -H "Content-Encoding: gzip" \
+    --data-binary @-
+```
+
+Supported encodings:
+- `gzip` / `x-gzip`
+- `deflate`
+- `identity` (no compression)
+
+#### Response Compression (nginx native)
+
+Enable gzip for responses in `config.yaml`:
+
+```yaml
+nginx_config:
+  http:
+    gzip: "on"
+    gzip_min_length: 256
+    gzip_comp_level: 6
+    gzip_types: "application/json application/javascript text/plain text/css text/xml"
+    gzip_vary: "on"
+    gzip_proxied: "any"
+```
+
+Test response compression:
+
+```bash
+# Request with gzip support
+curl -H "Accept-Encoding: gzip" http://localhost:9080/v1/api-key \
+  -d '{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock":"0x0"}],"id":1}' \
+  -o response.gz
+
+# Check if compressed
+file response.gz  # Should show "gzip compressed data"
+```
+
+#### Compression Benefits for JSON-RPC
+
+| Response Type | Typical Size | Compressed | Ratio |
+|--------------|--------------|------------|-------|
+| `eth_blockNumber` | 100 B | 85 B | 85% |
+| `eth_getBlock` | 5 KB | 1 KB | 20% |
+| `eth_getLogs` (100 logs) | 50 KB | 5 KB | 10% |
+| `debug_traceTransaction` | 1 MB | 50 KB | 5% |
+
+**Recommendation**: Always enable gzip for production. Large responses like `eth_getLogs` and `debug_traceTransaction` benefit significantly.
 
 ---
 
