@@ -41,7 +41,7 @@ jobs:
       - name: Run unit tests
         run: |
           cd tests
-          busted unit/ --verbose --output=TAP
+          busted unit/ --verbose --output=TAP --pattern="test_"
 
   # ============================================================
   # Stage 2: Integration Tests (~1 minute)
