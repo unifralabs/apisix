@@ -24,7 +24,6 @@ plugins:
   # ================================
   # IMPORTANT: Order matters - plugins run by priority (higher = earlier)
   - unifra-jsonrpc-var      # Priority: 26000 - Parse JSON-RPC, inject variables
-  - unifra-guard            # Priority: 25000 - Emergency circuit breaker
   - unifra-ctx-var          # Priority: 24000 - Inject consumer variables (quota, etc.)
   - unifra-whitelist        # Priority: 1900  - Method access control
   - unifra-calculate-cu     # Priority: 1012  - Calculate compute units

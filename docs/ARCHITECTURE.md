@@ -143,7 +143,6 @@ local var_mt = {
 unifra-apisix/                    # External directory (not in APISIX repo)
 ├── apisix/plugins/               # Plugin wrappers (APISIX plugin format)
 │   ├── unifra-jsonrpc-var.lua    # Priority 26000 - runs first
-│   ├── unifra-guard.lua          # Priority 25000
 │   ├── unifra-ctx-var.lua        # Priority 24000
 │   ├── unifra-whitelist.lua      # Priority 1900
 │   ├── unifra-calculate-cu.lua   # Priority 1012
@@ -171,7 +170,6 @@ apisix:
 
 plugins:
   - unifra-jsonrpc-var      # Now APISIX can find these
-  - unifra-guard
   - unifra-ctx-var
   # ... etc
 ```
@@ -191,14 +189,6 @@ Request arrives
 │  - Parse JSON-RPC body                                          │
 │  - Write jsonrpc_method, jsonrpc_methods, unifra_network        │
 │  - Store ctx.jsonrpc for later plugins                          │
-└─────────────────────────────────────────────────────────────────┘
-      │
-      ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  unifra-guard (25000)                                           │
-│  - Emergency circuit breaker                                    │
-│  - Block specific consumers/methods/IPs                         │
-│  - Can reject request immediately                               │
 └─────────────────────────────────────────────────────────────────┘
       │
       ▼
@@ -261,7 +251,6 @@ Request arrives
 | Plugin | Priority | Reason |
 |--------|----------|--------|
 | unifra-jsonrpc-var | 26000 | Must parse body before anything else reads it |
-| unifra-guard | 25000 | Emergency block before any processing |
 | unifra-ctx-var | 24000 | Consumer vars needed for quota checks |
 | unifra-whitelist | 1900 | Reject invalid methods early |
 | unifra-calculate-cu | 1012 | CU needed for rate limiting |

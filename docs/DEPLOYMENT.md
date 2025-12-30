@@ -116,7 +116,6 @@ apisix:
 plugins:
   # Unifra plugins (in priority order)
   - unifra-jsonrpc-var
-  - unifra-guard
   - unifra-ctx-var
   - unifra-whitelist
   - unifra-calculate-cu
@@ -226,7 +225,6 @@ apisix:
 
     plugins:
       - unifra-jsonrpc-var
-      - unifra-guard
       - unifra-ctx-var
       - unifra-whitelist
       - unifra-calculate-cu
@@ -268,7 +266,6 @@ configMapGenerator:
   - name: unifra-apisix
     files:
       - unifra-apisix/apisix/plugins/unifra-jsonrpc-var.lua
-      - unifra-apisix/apisix/plugins/unifra-guard.lua
       - unifra-apisix/apisix/plugins/unifra-ctx-var.lua
       - unifra-apisix/apisix/plugins/unifra-whitelist.lua
       - unifra-apisix/apisix/plugins/unifra-calculate-cu.lua

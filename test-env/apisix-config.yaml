@@ -18,7 +18,6 @@ apisix:
 plugins:
   # Unifra plugins (listed by priority, highest first)
   - unifra-jsonrpc-var      # 26000 - Parse JSON-RPC
-  - unifra-guard            # 25000 - Emergency blocker
   - unifra-ctx-var          # 24000 - Consumer variables
   - unifra-whitelist        # 1900  - Access control
   - unifra-calculate-cu     # 1012  - CU calculation

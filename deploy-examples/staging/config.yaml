@@ -16,7 +16,6 @@ apisix:
 plugins:
   # --- Unifra Plugins ---
   - unifra-jsonrpc-var
-  - unifra-guard
   - unifra-ctx-var
   - unifra-whitelist
   - unifra-calculate-cu

@@ -40,7 +40,6 @@ apisix:
 
 plugins:
   - unifra-jsonrpc-var
-  - unifra-guard
   - unifra-ctx-var
   - unifra-whitelist
   - unifra-calculate-cu
@@ -87,11 +86,6 @@ curl -X POST https://eth-mainnet.unifra.io/v1/your-api-key \
 │  │  ┌─────────────────┐                                          │  │
 │  │  │unifra-jsonrpc-var│ ─────► Parse JSON-RPC, inject ctx.var   │  │
 │  │  │   (26000)        │                                          │  │
-│  │  └────────┬─────────┘                                          │  │
-│  │           │                                                     │  │
-│  │  ┌────────▼─────────┐                                          │  │
-│  │  │  unifra-guard    │ ─────► Emergency circuit breaker         │  │
-│  │  │   (25000)        │                                          │  │
 │  │  └────────┬─────────┘                                          │  │
 │  │           │                                                     │  │
 │  │  ┌────────▼─────────┐                                          │  │

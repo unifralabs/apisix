@@ -16,7 +16,6 @@ apisix:
 plugins:
   # --- Unifra Plugins ---
   - unifra-jsonrpc-var     # Parse JSON-RPC, set context variables
-  - unifra-guard           # Security checks
   - unifra-ctx-var         # Consumer context injection
   - unifra-whitelist       # Method access control
   - unifra-calculate-cu    # Compute unit calculation

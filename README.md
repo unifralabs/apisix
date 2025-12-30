@@ -53,7 +53,6 @@ apisix:
 plugins:
   # Unifra plugins (by priority, highest first)
   - unifra-jsonrpc-var      # 26000 - Parse JSON-RPC
-  - unifra-guard            # 25000 - Emergency blocker
   - unifra-ctx-var          # 24000 - Consumer variables
   - unifra-whitelist        # 1900  - Access control
   - unifra-calculate-cu     # 1012  - CU calculation
@@ -110,7 +109,6 @@ curl -X POST https://eth-mainnet.unifra.io/v1/your-api-key \
 | Plugin | Priority | Description |
 |--------|----------|-------------|
 | `unifra-jsonrpc-var` | 26000 | Parse JSON-RPC, inject `ctx.var.jsonrpc_method`, etc. |
-| `unifra-guard` | 25000 | Emergency block by consumer/method/IP |
 | `unifra-ctx-var` | 24000 | Inject consumer quotas into ctx.var |
 | `unifra-whitelist` | 1900 | Check method access (free vs paid tier) |
 | `unifra-calculate-cu` | 1012 | Calculate CU cost for request |

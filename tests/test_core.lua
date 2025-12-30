@@ -126,12 +126,13 @@ test("error_response: generates valid JSON", function()
     assert_eq(decoded.error.message, "Parse error")
 end)
 
--- Test error_response: nil id
+-- Test error_response: nil id (JSON null)
 test("error_response: nil id", function()
     local resp = core.error_response(-32700, "Parse error", nil)
     local cjson = require("cjson.safe")
     local decoded = cjson.decode(resp)
-    assert_eq(decoded.id, nil)
+    -- cjson represents JSON null as cjson.null (userdata), not Lua nil
+    assert(decoded.id == nil or decoded.id == cjson.null, "id should be null")
 end)
 
 -- Test error_table

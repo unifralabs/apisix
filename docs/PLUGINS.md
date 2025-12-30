@@ -4,13 +4,12 @@
 
 1. [Plugin Overview](#plugin-overview)
 2. [unifra-jsonrpc-var](#unifra-jsonrpc-var)
-3. [unifra-guard](#unifra-guard)
-4. [unifra-ctx-var](#unifra-ctx-var)
-5. [unifra-whitelist](#unifra-whitelist)
-6. [unifra-calculate-cu](#unifra-calculate-cu)
-7. [unifra-limit-monthly-cu](#unifra-limit-monthly-cu)
-8. [unifra-limit-cu](#unifra-limit-cu)
-9. [unifra-ws-jsonrpc-proxy](#unifra-ws-jsonrpc-proxy)
+3. [unifra-ctx-var](#unifra-ctx-var)
+4. [unifra-whitelist](#unifra-whitelist)
+5. [unifra-calculate-cu](#unifra-calculate-cu)
+6. [unifra-limit-monthly-cu](#unifra-limit-monthly-cu)
+7. [unifra-limit-cu](#unifra-limit-cu)
+8. [unifra-ws-jsonrpc-proxy](#unifra-ws-jsonrpc-proxy)
 
 ---
 
@@ -19,7 +18,6 @@
 | Plugin | Priority | Phase | Description |
 |--------|----------|-------|-------------|
 | unifra-jsonrpc-var | 26000 | rewrite | Parse JSON-RPC, inject variables |
-| unifra-guard | 25000 | rewrite | Emergency circuit breaker |
 | unifra-ctx-var | 24000 | rewrite | Inject consumer variables |
 | unifra-whitelist | 1900 | access | Method access control |
 | unifra-calculate-cu | 1012 | access | Compute unit calculation |
@@ -110,95 +108,6 @@ For batch requests like:
 The plugin sets:
 - `jsonrpc_method` = "batch"
 - `jsonrpc_methods` = ["eth_blockNumber", "eth_chainId"]
-
----
-
-## unifra-guard
-
-**Priority**: 25000
-**Phase**: rewrite
-**Location**: `apisix/plugins/unifra-guard.lua`
-
-### Purpose
-
-Emergency circuit breaker that can immediately block requests based on consumer, method, or IP. Use this for incident response when you need to quickly block malicious traffic.
-
-### Schema
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "blocked_consumers": {
-      "type": "array",
-      "items": { "type": "string" },
-      "default": [],
-      "description": "List of consumer names to block"
-    },
-    "blocked_methods": {
-      "type": "array",
-      "items": { "type": "string" },
-      "default": [],
-      "description": "List of methods to block (supports wildcards like debug_*)"
-    },
-    "blocked_ips": {
-      "type": "array",
-      "items": { "type": "string" },
-      "default": [],
-      "description": "List of IP addresses to block"
-    }
-  }
-}
-```
-
-### Example Configuration
-
-**Block specific consumer:**
-```json
-{
-  "plugins": {
-    "unifra-guard": {
-      "blocked_consumers": ["malicious-user-123"]
-    }
-  }
-}
-```
-
-**Block debug methods globally:**
-```json
-{
-  "plugins": {
-    "unifra-guard": {
-      "blocked_methods": ["debug_*", "trace_*"]
-    }
-  }
-}
-```
-
-**Block specific IP:**
-```json
-{
-  "plugins": {
-    "unifra-guard": {
-      "blocked_ips": ["192.168.1.100", "10.0.0.50"]
-    }
-  }
-}
-```
-
-### Response
-
-When blocked, returns:
-```json
-{
-  "jsonrpc": "2.0",
-  "error": {
-    "code": -32603,
-    "message": "blocked by guard"
-  },
-  "id": null
-}
-```
 
 ---
 
