@@ -276,8 +276,8 @@ configMapGenerator:
       - unifra-apisix/unifra/jsonrpc/whitelist.lua
       - unifra-apisix/unifra/jsonrpc/cu.lua
       - unifra-apisix/unifra/jsonrpc/ratelimit.lua
-      - unifra-apisix/conf/whitelist.json
-      - unifra-apisix/conf/cu-pricing.json
+      - unifra-apisix/conf/whitelist.yaml
+      - unifra-apisix/conf/cu-pricing.yaml
 ```
 
 ---
@@ -353,7 +353,7 @@ The plugins support **hot reloading** with TTL-based cache:
 
 ```bash
 # Edit whitelist
-vim /opt/unifra-apisix/conf/whitelist.json
+vim /opt/unifra-apisix/conf/whitelist.yaml
 
 # Changes take effect within 60 seconds (default TTL)
 # Or force immediate reload:

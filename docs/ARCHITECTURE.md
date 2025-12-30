@@ -155,8 +155,8 @@ unifra-apisix/                    # External directory (not in APISIX repo)
 │   ├── cu.lua                    # CU calculation logic
 │   └── ratelimit.lua             # Redis rate limiting
 └── conf/                         # Configuration files
-    ├── whitelist.json
-    └── cu-pricing.json
+    ├── whitelist.yaml
+    └── cu-pricing.yaml
 ```
 
 ### Loading External Plugins

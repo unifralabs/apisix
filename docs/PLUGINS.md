@@ -258,42 +258,42 @@ Controls which JSON-RPC methods are allowed for each network and user tier (free
 
 ### Whitelist Configuration File
 
-**whitelist.json:**
-```json
-{
-  "networks": {
-    "eth-mainnet": {
-      "free": [
-        "eth_blockNumber",
-        "eth_chainId",
-        "eth_gasPrice",
-        "eth_getBalance",
-        "eth_getBlockByNumber",
-        "eth_getBlockByHash",
-        "eth_getTransactionByHash",
-        "eth_getTransactionReceipt",
-        "eth_call",
-        "eth_estimateGas",
-        "eth_sendRawTransaction",
-        "eth_getLogs",
-        "eth_getCode",
-        "eth_getStorageAt",
-        "eth_getTransactionCount",
-        "net_version",
-        "web3_clientVersion"
-      ],
-      "paid": [
-        "debug_*",
-        "trace_*",
-        "eth_createAccessList"
-      ]
-    },
-    "polygon-mainnet": {
-      "free": ["eth_*", "net_*", "web3_*"],
-      "paid": ["debug_*", "trace_*", "bor_*"]
-    }
-  }
-}
+**whitelist.yaml:**
+```yaml
+networks:
+  eth-mainnet:
+    free:
+      - eth_blockNumber
+      - eth_chainId
+      - eth_gasPrice
+      - eth_getBalance
+      - eth_getBlockByNumber
+      - eth_getBlockByHash
+      - eth_getTransactionByHash
+      - eth_getTransactionReceipt
+      - eth_call
+      - eth_estimateGas
+      - eth_sendRawTransaction
+      - eth_getLogs
+      - eth_getCode
+      - eth_getStorageAt
+      - eth_getTransactionCount
+      - net_version
+      - web3_clientVersion
+    paid:
+      - debug_*
+      - trace_*
+      - eth_createAccessList
+
+  polygon-mainnet:
+    free:
+      - eth_*
+      - net_*
+      - web3_*
+    paid:
+      - debug_*
+      - trace_*
+      - bor_*
 ```
 
 ### Free vs Paid Tier
@@ -375,31 +375,40 @@ Calculates the total Compute Unit (CU) cost for a request based on the methods c
 
 ### CU Pricing Configuration
 
-**cu-pricing.json:**
-```json
-{
-  "default": 1,
-  "methods": {
-    "eth_blockNumber": 1,
-    "eth_chainId": 1,
-    "eth_gasPrice": 1,
-    "eth_getBalance": 5,
-    "eth_getBlockByNumber": 10,
-    "eth_getBlockByHash": 10,
-    "eth_getTransactionByHash": 5,
-    "eth_getTransactionReceipt": 5,
-    "eth_call": 15,
-    "eth_estimateGas": 20,
-    "eth_sendRawTransaction": 10,
-    "eth_getLogs": 20,
-    "eth_getCode": 5,
-    "eth_getStorageAt": 5,
-    "eth_getTransactionCount": 5,
-    "debug_traceTransaction": 100,
-    "debug_*": 50,
-    "trace_*": 50
-  }
-}
+**cu-pricing.yaml:**
+```yaml
+# Default CU cost for unlisted methods
+default: 1
+
+# Method-specific CU costs
+methods:
+  # Basic methods (1 CU)
+  eth_blockNumber: 1
+  eth_chainId: 1
+  eth_gasPrice: 1
+
+  # Standard methods (5 CU)
+  eth_getBalance: 5
+  eth_getTransactionByHash: 5
+  eth_getTransactionReceipt: 5
+  eth_getCode: 5
+  eth_getStorageAt: 5
+  eth_getTransactionCount: 5
+
+  # Block methods (10 CU)
+  eth_getBlockByNumber: 10
+  eth_getBlockByHash: 10
+  eth_sendRawTransaction: 10
+
+  # Complex methods (15-20 CU)
+  eth_call: 15
+  eth_estimateGas: 20
+  eth_getLogs: 20
+
+  # Debug/Trace methods (50-100 CU)
+  debug_traceTransaction: 100
+  debug_*: 50
+  trace_*: 50
 ```
 
 ### Output

@@ -171,7 +171,7 @@ Whitelist and CU configs support automatic reloading:
 }
 ```
 
-After editing `conf/whitelist.json`:
+After editing `conf/whitelist.yaml`:
 - Wait up to 60 seconds for auto-reload, OR
 - Run `apisix reload` for immediate effect
 

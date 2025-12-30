@@ -39,7 +39,8 @@ apisix:
   extra_lua_path: "/opt/unifra-apisix/?.lua"
 
 plugins:
-  - unifra-jsonrpc-var
+  - unifra-key-auth         # Extract API key from URL path
+  - unifra-jsonrpc-var      # Parse JSON-RPC + gzip decompression
   - unifra-ctx-var
   - unifra-whitelist
   - unifra-calculate-cu
@@ -84,18 +85,23 @@ curl -X POST https://eth-mainnet.unifra.io/v1/your-api-key \
 │  │                        Plugin Chain                            │  │
 │  │                                                                │  │
 │  │  ┌─────────────────┐                                          │  │
-│  │  │unifra-jsonrpc-var│ ─────► Parse JSON-RPC, inject ctx.var   │  │
-│  │  │   (26000)        │                                          │  │
-│  │  └────────┬─────────┘                                          │  │
+│  │  │ unifra-key-auth │ ─────► Extract API key from URL path     │  │
+│  │  │   (27000)       │        /v1/{key}/... → header injection  │  │
+│  │  └────────┬────────┘                                          │  │
 │  │           │                                                     │  │
 │  │  ┌────────▼─────────┐                                          │  │
-│  │  │  key-auth        │ ─────► Authenticate API key              │  │
-│  │  │   (2500)         │                                          │  │
+│  │  │unifra-jsonrpc-var│ ─────► Parse JSON-RPC + gzip decompress │  │
+│  │  │   (26000)        │        inject ctx.var.*                  │  │
 │  │  └────────┬─────────┘                                          │  │
 │  │           │                                                     │  │
 │  │  ┌────────▼─────────┐                                          │  │
 │  │  │ unifra-ctx-var   │ ─────► Inject consumer quotas            │  │
 │  │  │   (24000)        │                                          │  │
+│  │  └────────┬─────────┘                                          │  │
+│  │           │                                                     │  │
+│  │  ┌────────▼─────────┐                                          │  │
+│  │  │  key-auth        │ ─────► Authenticate API key              │  │
+│  │  │   (2500)         │                                          │  │
 │  │  └────────┬─────────┘                                          │  │
 │  │           │                                                     │  │
 │  │  ┌────────▼─────────┐                                          │  │
@@ -128,7 +134,11 @@ curl -X POST https://eth-mainnet.unifra.io/v1/your-api-key \
 
 ### Q: How do I update whitelist/CU config?
 
-Edit the JSON files. Changes auto-reload within 60 seconds (configurable TTL).
+Edit the YAML files in `conf/`:
+- `whitelist.yaml` - Method access control per network
+- `cu-pricing.yaml` - Compute unit costs per method
+
+Changes auto-reload within 60 seconds (configurable via `config_ttl`).
 
 ### Q: Does this work with WebSocket?
 
@@ -140,7 +150,7 @@ By default, plugins have `allow_degradation: true`, so requests continue without
 
 ### Q: How do I add a new JSON-RPC method?
 
-Add it to `conf/whitelist.json` under the appropriate network and tier (free/paid).
+Add it to `conf/whitelist.yaml` under the appropriate network and tier (free/paid).
 
 ## Getting Help
 

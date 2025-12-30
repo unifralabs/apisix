@@ -360,10 +360,10 @@ sudo chown -R apisix:apisix /opt/unifra-apisix
 **Solution:**
 ```bash
 # Check config path
-ls -la /opt/unifra-apisix/conf/whitelist.json
+ls -la /opt/unifra-apisix/conf/whitelist.yaml
 
 # Verify JSON is valid
-cat /opt/unifra-apisix/conf/whitelist.json | jq .
+cat /opt/unifra-apisix/conf/whitelist.yaml | jq .
 
 # Check APISIX error log
 grep "whitelist" /usr/local/apisix/logs/error.log
@@ -437,10 +437,10 @@ Add `network` override to plugin config:
 **Solution:**
 ```bash
 # Check whitelist config
-cat /opt/unifra-apisix/conf/whitelist.json | jq '.networks["eth-mainnet"]'
+cat /opt/unifra-apisix/conf/whitelist.yaml | jq '.networks["eth-mainnet"]'
 
 # Add method to free list
-vim /opt/unifra-apisix/conf/whitelist.json
+vim /opt/unifra-apisix/conf/whitelist.yaml
 
 # Wait for TTL or force reload
 apisix reload
