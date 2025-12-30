@@ -1,356 +1,190 @@
 # Unifra APISIX Test Suite
 
-This directory contains unit and integration tests for the Unifra APISIX plugins and modules.
+This directory contains tests for the Unifra APISIX plugins and modules, organized by dependency layer.
 
-## Test Structure
+## Test Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                       Test Pyramid                               │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│                          ┌─────┐                                │
+│                         /  E2E  \        ~3 min                 │
+│                        /─────────\       Full stack             │
+│                       /           \      test-env/              │
+│                      /─────────────\                            │
+│                     /  Integration  \    ~1 min                 │
+│                    /─────────────────\   OpenResty (resty)      │
+│                   /                   \  tests/integration/     │
+│                  /─────────────────────\                        │
+│                 /         Unit          \  ~10 sec              │
+│                /─────────────────────────\ busted + mocks       │
+│               /                           \ tests/unit/         │
+│              /─────────────────────────────\                    │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Directory Structure
 
 ```
 tests/
-├── README.md                          # This file
-├── test_feature_flags.lua             # Feature flag system tests
-├── test_redis_circuit_breaker.lua     # Circuit breaker pattern tests
-├── test_config.lua                    # Config management tests
-└── integration/                       # (Future) Integration tests
-    ├── test_rate_limiting.lua
-    ├── test_monthly_quota.lua
-    └── test_websocket_proxy.lua
-```
+├── unit/                           # Layer 0: busted + mocks (no external deps)
+│   ├── test_core_parsing.lua       # JSON-RPC parsing
+│   ├── test_whitelist.lua          # Whitelist access control
+│   ├── test_cu_calculation.lua     # CU calculation
+│   ├── test_config.lua             # Config management
+│   ├── test_circuit_breaker.lua    # Redis circuit breaker
+│   └── test_key_extraction.lua     # API key URL extraction
+│
+├── integration/                    # Layer 1: OpenResty runtime (resty)
+│   ├── test_jsonrpc_core.lua       # JSON-RPC core with cjson
+│   ├── test_cu.lua                 # CU module
+│   └── test_compression.lua        # gzip compression
+│
+├── e2e/                            # Layer 2: placeholder
+│   └── (e2e tests are in test-env/)
+│
+├── conftest.lua                    # Shared test configuration
+├── fixtures/                       # Test data
+└── helpers/                        # Test utilities
 
-## Prerequisites
-
-### Install Busted (Lua Testing Framework)
-
-```bash
-# Using LuaRocks
-luarocks install busted
-
-# Or via system package manager
-# Ubuntu/Debian
-apt-get install lua-busted
-
-# macOS
-brew install lua
-luarocks install busted
-```
-
-### Install Dependencies
-
-```bash
-# Install required Lua modules
-luarocks install luafilesystem
-luarocks install lua-cjson
-luarocks install tinyyaml  # For YAML parsing
+test-env/                           # E2E: Full stack tests
+├── docker-compose.yml              # APISIX + etcd + Redis
+├── test-all.sh                     # Main E2E test script
+├── test-billing.sh
+├── test-rate-limiting.sh
+└── ...
 ```
 
 ## Running Tests
 
-### Run All Tests
+### Layer 0: Unit Tests (busted)
 
 ```bash
-# From project root
-busted tests/
+# Install dependencies
+luarocks install busted luafilesystem lua-cjson
 
-# With verbose output
-busted --verbose tests/
+# Run all unit tests
+cd tests && busted unit/ --verbose
 
-# With coverage
-busted --coverage tests/
+# Run specific test
+busted unit/test_config.lua
 ```
 
-### Run Specific Test File
+### Layer 1: Integration Tests (OpenResty)
 
 ```bash
-busted tests/test_feature_flags.lua
-busted tests/test_redis_circuit_breaker.lua
-busted tests/test_config.lua
+# Using APISIX container
+docker run --rm \
+  -v $(pwd):/opt/unifra-apisix \
+  -w /opt/unifra-apisix \
+  apache/apisix:3.14.0-debian \
+  bash -c 'cd tests/integration && for f in test_*.lua; do resty "$f"; done'
+
+# Or locally with OpenResty
+cd tests/integration
+resty test_jsonrpc_core.lua
+resty test_compression.lua
 ```
 
-### Run with Pattern Matching
+### Layer 2: E2E Tests (Full Stack)
 
 ```bash
-# Run only tests matching "circuit breaker"
-busted --filter="circuit breaker" tests/
+# Start test environment
+cd test-env
+docker-compose up -d
 
-# Run only tests matching "cache"
-busted --filter="cache" tests/
+# Start Anvil (blockchain mock)
+anvil --host 0.0.0.0 --port 8545 &
+
+# Run E2E tests
+./test-all.sh
 ```
 
-## Test Coverage
+## CI Pipeline
 
-### Core Modules Tested
+The GitHub Actions workflow runs tests in stages:
 
-1. **Feature Flags** (`unifra/feature_flags.lua`)
-   - Global/route/consumer level configuration
-   - Percentage-based rollout
-   - Priority resolution
+| Stage | Name | Dependencies | Duration |
+|-------|------|--------------|----------|
+| 1 | Unit Tests | busted + mocks | ~10s |
+| 2 | Integration Tests | OpenResty (Docker) | ~1m |
+| 3 | E2E Tests | Full stack | ~3m |
 
-2. **Redis Circuit Breaker** (`unifra/jsonrpc/redis_circuit_breaker.lua`)
-   - State transitions (CLOSED → OPEN → HALF_OPEN)
-   - Failure threshold detection
-   - Fail-open/fail-closed strategies
-   - Health check recovery
+Each stage depends on the previous one passing.
 
-3. **Config Management** (`unifra/jsonrpc/config.lua`)
-   - Per-route caching
-   - TTL-based refresh
-   - YAML file loading
-   - Error handling
+## Writing Tests
 
-### Modules Requiring Integration Tests
-
-The following modules require real dependencies and should be tested with integration tests:
-
-1. **Redis Scripts** (`unifra/jsonrpc/redis_scripts.lua`)
-   - Requires real Redis instance
-   - Test sliding window algorithm
-   - Test monthly quota script
-   - Test atomic operations
-
-2. **Billing Module** (`unifra/jsonrpc/billing.lua`)
-   - Requires Redis + control plane mock
-   - Test cycle management
-   - Test quota enforcement
-
-3. **Rate Limiting Plugin** (`apisix/plugins/unifra-limit-cu.lua`)
-   - Requires Redis instance
-   - Test sliding window vs fixed window
-   - Test concurrent requests
-   - Test circuit breaker integration
-
-4. **WebSocket Proxy** (`apisix/plugins/unifra-ws-jsonrpc-proxy.lua`)
-   - Requires real WebSocket server
-   - Test case-insensitive upgrade
-   - Test SSL verification
-   - Test config hot reload
-
-## Writing New Tests
-
-### Unit Test Template
+### Unit Test (busted + mocks)
 
 ```lua
---
--- Unit tests for my_module.lua
---
+-- tests/unit/test_my_module.lua
 
 describe("my_module", function()
     local my_module
 
     setup(function()
-        -- Mock dependencies
+        -- Mock ngx
         _G.ngx = {
             log = function() end,
-            INFO = 1,
-            WARN = 2,
-            ERR = 3,
+            INFO = 1, WARN = 2, ERR = 3,
         }
-
-        my_module = require("path.to.my_module")
+        my_module = require("unifra.jsonrpc.my_module")
     end)
 
     teardown(function()
-        package.loaded["path.to.my_module"] = nil
+        package.loaded["unifra.jsonrpc.my_module"] = nil
     end)
 
-    before_each(function()
-        -- Reset state before each test
-    end)
-
-    describe("feature name", function()
-        it("should do something", function()
-            local result = my_module.do_something()
-            assert.is_true(result)
-        end)
-
-        it("should handle errors", function()
-            local result, err = my_module.do_something_risky()
-            assert.is_nil(result)
-            assert.is_not_nil(err)
-        end)
+    it("should calculate correctly", function()
+        local result = my_module.calculate(10)
+        assert.equals(100, result)
     end)
 end)
 ```
 
-### Integration Test Template
+### Integration Test (resty)
 
 ```lua
---
--- Integration tests for my_feature
---
+#!/usr/bin/env resty
+-- tests/integration/test_my_feature.lua
 
-describe("my_feature integration", function()
-    local redis
-    local apisix_client
+local install_path = os.getenv("UNIFRA_PATH") or "/opt/unifra-apisix"
+package.path = install_path .. "/?.lua;" .. package.path
 
-    setup(function()
-        -- Connect to real services
-        redis = connect_to_test_redis()
-        apisix_client = create_apisix_client()
-    end)
+local my_module = require("unifra.jsonrpc.my_module")
 
-    teardown(function()
-        -- Cleanup
-        redis:close()
-    end)
+local function test(name, fn)
+    local ok, err = pcall(fn)
+    print(ok and "[PASS] " or "[FAIL] ", name, err or "")
+end
 
-    before_each(function()
-        -- Clear test data
-        redis:flushdb()
-    end)
-
-    it("should process request end-to-end", function()
-        local response = apisix_client:post("/v1/test", {
-            jsonrpc = "2.0",
-            method = "eth_blockNumber",
-            id = 1
-        })
-
-        assert.equals(200, response.status)
-        assert.is_not_nil(response.body)
-    end)
+test("real cjson encoding", function()
+    local result = my_module.encode({foo = "bar"})
+    assert(result == '{"foo":"bar"}')
 end)
+
+print("All tests completed")
 ```
 
-## Integration Test Setup
+## Test Coverage by Module
 
-### 1. Start Test Redis
+| Module | Unit | Integration | E2E |
+|--------|------|-------------|-----|
+| unifra/jsonrpc/core.lua | ✅ | ✅ | ✅ |
+| unifra/jsonrpc/whitelist.lua | ✅ | - | ✅ |
+| unifra/jsonrpc/cu.lua | ✅ | ✅ | ✅ |
+| unifra/jsonrpc/config.lua | ✅ | - | - |
+| unifra/compression.lua | - | ✅ | - |
+| unifra/jsonrpc/redis_circuit_breaker.lua | ✅ | - | - |
+| apisix/plugins/* | - | - | ✅ |
 
-```bash
-# Using Docker
-docker run -d --name test-redis -p 6380:6379 redis:7
+## Best Practices
 
-# Configure plugins to use test Redis
-export REDIS_HOST=127.0.0.1
-export REDIS_PORT=6380
-```
-
-### 2. Start Test APISIX Instance
-
-```bash
-# Copy test configuration
-cp conf/config-test.yaml conf/config.yaml
-
-# Start APISIX in test mode
-make run
-```
-
-### 3. Run Integration Tests
-
-```bash
-# Set test environment
-export TEST_MODE=integration
-export APISIX_URL=http://127.0.0.1:9080
-
-# Run tests
-busted tests/integration/
-```
-
-## Continuous Integration
-
-### GitHub Actions Example
-
-```yaml
-name: Tests
-
-on: [push, pull_request]
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-
-    services:
-      redis:
-        image: redis:7
-        ports:
-          - 6379:6379
-
-    steps:
-      - uses: actions/checkout@v3
-
-      - name: Install Lua
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y lua5.1 luarocks
-
-      - name: Install dependencies
-        run: |
-          sudo luarocks install busted
-          sudo luarocks install luafilesystem
-          sudo luarocks install lua-cjson
-
-      - name: Run unit tests
-        run: busted tests/
-
-      - name: Run integration tests
-        run: |
-          export REDIS_HOST=127.0.0.1
-          busted tests/integration/
-```
-
-## Test Best Practices
-
-1. **Isolate Tests**: Each test should be independent
-2. **Mock External Dependencies**: Use mocks for Redis, HTTP clients, etc. in unit tests
-3. **Clean Up**: Always clean up test data in `teardown()` or `after_each()`
-4. **Use Descriptive Names**: Test names should clearly describe what is being tested
-5. **Test Edge Cases**: Include tests for error conditions, boundary values, etc.
-6. **Avoid Timing Dependencies**: Don't rely on `sleep()` or real time passing
-
-## Debugging Tests
-
-### Enable Verbose Logging
-
-```bash
-# Show all output including print statements
-busted --verbose tests/
-
-# Show only failed tests
-busted --output=junit tests/ > test-results.xml
-```
-
-### Run Single Test
-
-```bash
-# Run only one specific test
-busted tests/test_feature_flags.lua --filter="should return false when flag not configured"
-```
-
-### Interactive Debugging
-
-```lua
--- Add breakpoint in test
-it("should debug", function()
-    local value = my_module.calculate()
-    print("DEBUG: value=" .. tostring(value))  -- Will show in verbose mode
-    assert.is_not_nil(value)
-end)
-```
-
-## Known Issues
-
-1. **Module Caching**: Lua caches modules, so you may need to use `package.loaded[module] = nil` to reload
-2. **Global State**: Some APISIX modules use global state, which can interfere between tests
-3. **Async Operations**: ngx.timer and ngx.thread operations are hard to test without real OpenResty
-
-## Future Work
-
-- [ ] Add integration tests for all plugins
-- [ ] Set up CI/CD pipeline
-- [ ] Add load tests for rate limiting
-- [ ] Add chaos tests for circuit breaker
-- [ ] Implement test coverage reporting
-- [ ] Create performance benchmarks
-
-## Contributing
-
-When adding new features:
-
-1. Write unit tests first (TDD approach recommended)
-2. Ensure all tests pass before submitting PR
-3. Add integration tests for features requiring external services
-4. Update this README with any new test requirements
-
-## Resources
-
-- [Busted Documentation](https://olivinelabs.com/busted/)
-- [Lua Testing Best Practices](http://lua-users.org/wiki/UnitTesting)
-- [APISIX Testing Guide](https://apisix.apache.org/docs/apisix/how-to-guide/test)
+1. **Write unit tests for pure logic** - JSON parsing, calculations, validation
+2. **Use integration tests for runtime deps** - ffi-zlib, cjson encoding
+3. **Use E2E for plugin chain** - Full request flow through APISIX
+4. **Mock only what's necessary** - Prefer real implementations when possible
+5. **Test edge cases** - Empty inputs, invalid data, boundary conditions

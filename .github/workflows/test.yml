@@ -2,7 +2,7 @@ name: Test Suite
 
 on:
   push:
-    branches: [master, main, develop, 'feature/*']
+    branches: [master, main, develop, 'feature/*', 'feat/*']
   pull_request:
     branches: [master, main]
 
@@ -11,9 +11,14 @@ env:
   REDIS_PORT: 6379
 
 jobs:
-  # Stage 1: Unit Tests (fastest feedback)
+  # ============================================================
+  # Stage 1: Unit Tests (fastest feedback, ~10 seconds)
+  # ============================================================
+  # Dependencies: busted + mocks only
+  # No external services needed
+  # ============================================================
   unit-tests:
-    name: Unit Tests
+    name: Unit Tests (busted)
     runs-on: ubuntu-latest
 
     steps:
@@ -38,51 +43,55 @@ jobs:
           cd tests
           busted unit/ --verbose --output=TAP
 
-  # Stage 2: Component Tests (with Redis)
-  component-tests:
-    name: Component Tests
+  # ============================================================
+  # Stage 2: Integration Tests (~1 minute)
+  # ============================================================
+  # Dependencies: OpenResty environment (resty, ffi-zlib)
+  # Uses APISIX container for OpenResty runtime
+  # ============================================================
+  integration-tests:
+    name: Integration Tests (OpenResty)
     runs-on: ubuntu-latest
     needs: unit-tests
-
-    services:
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Lua
-        uses: leafo/gh-actions-lua@v10
-        with:
-          luaVersion: "5.1"
-
-      - name: Setup LuaRocks
-        uses: leafo/gh-actions-luarocks@v4
-
-      - name: Install dependencies
+      - name: Run integration tests in APISIX container
+        env:
+          WORKSPACE: ${{ github.workspace }}
         run: |
-          luarocks install busted
-          luarocks install luafilesystem
-          luarocks install lua-cjson
-          luarocks install redis-lua
+          docker run --rm \
+            -v "${WORKSPACE}:/opt/unifra-apisix" \
+            -w /opt/unifra-apisix \
+            apache/apisix:3.14.0-debian \
+            bash -c '
+              export UNIFRA_PATH=/opt/unifra-apisix
+              cd tests/integration
+              failed=0
+              for test_file in test_*.lua; do
+                echo "=== Running $test_file ==="
+                if resty "$test_file"; then
+                  echo "[PASS] $test_file"
+                else
+                  echo "[FAIL] $test_file"
+                  failed=1
+                fi
+                echo ""
+              done
+              exit $failed
+            '
 
-      - name: Run component tests
-        run: |
-          cd tests
-          busted component/ --verbose --output=TAP
-
-  # Stage 3: Integration Tests (full stack)
-  integration-tests:
-    name: Integration Tests
+  # ============================================================
+  # Stage 3: E2E Tests (~3 minutes)
+  # ============================================================
+  # Dependencies: Full stack (APISIX + etcd + Redis + Anvil)
+  # Tests complete plugin chain with real requests
+  # ============================================================
+  e2e-tests:
+    name: E2E Tests (Full Stack)
     runs-on: ubuntu-latest
-    needs: component-tests
+    needs: integration-tests
 
     steps:
       - uses: actions/checkout@v4
@@ -104,7 +113,7 @@ jobs:
         run: |
           timeout 60 bash -c 'until curl -s http://localhost:9180/apisix/admin/plugins/list -H "X-API-KEY: unifra-test-admin-key" > /dev/null; do sleep 2; done'
 
-      - name: Run integration tests
+      - name: Run E2E tests
         run: ./test-env/test-all.sh
 
       - name: Collect logs on failure

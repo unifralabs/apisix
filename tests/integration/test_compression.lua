@@ -1,8 +1,16 @@
+#!/usr/bin/env resty
 --
 -- Tests for Unifra Compression Module
 --
+-- Run with: resty tests/integration/test_compression.lua
+-- Requires OpenResty environment with ffi-zlib
+--
 
-package.path = package.path .. ";../?.lua"
+-- Adjust path based on installation location
+local install_path = os.getenv("UNIFRA_PATH") or "/opt/unifra-apisix"
+-- Include APISIX dependencies (ffi-zlib, etc.)
+local apisix_deps = "/usr/local/apisix/deps/share/lua/5.1"
+package.path = install_path .. "/?.lua;" .. apisix_deps .. "/?.lua;" .. package.path
 
 local compression = require("unifra.compression")
 
