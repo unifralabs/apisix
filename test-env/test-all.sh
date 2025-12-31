@@ -254,9 +254,9 @@ for i in {1..20}; do
       -H "apikey: $API_KEY" \
       -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":'$i'}')
     if echo "$result" | grep -q '"result"'; then
-        ((success++))
+        ((success++)) || true
     elif echo "$result" | grep -q "rate limit"; then
-        ((rate_limited++))
+        ((rate_limited++)) || true
     fi
 done
 echo "  Results: $success succeeded, $rate_limited rate-limited"
