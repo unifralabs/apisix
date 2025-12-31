@@ -101,7 +101,7 @@ jobs:
       - name: Start test environment
         run: |
           cd test-env
-          docker-compose up -d
+          docker compose up -d
 
       - name: Install Foundry (Anvil)
         uses: foundry-rs/foundry-toolchain@v1
@@ -121,7 +121,7 @@ jobs:
       - name: Collect logs on failure
         if: failure()
         run: |
-          docker-compose -f test-env/docker-compose.yml logs > apisix-logs.txt
+          docker compose -f test-env/docker-compose.yml logs > apisix-logs.txt
 
       - name: Upload logs
         if: failure()
@@ -134,4 +134,4 @@ jobs:
         if: always()
         run: |
           cd test-env
-          docker-compose down -v
+          docker compose down -v
