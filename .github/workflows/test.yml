@@ -39,6 +39,8 @@ jobs:
           luarocks install lua-cjson
 
       - name: Run unit tests
+        env:
+          LUA_PATH: "${{ github.workspace }}/?.lua;${{ github.workspace }}/?/init.lua;;"
         run: |
           cd tests
           busted unit/ --verbose --output=TAP --pattern="test_"
