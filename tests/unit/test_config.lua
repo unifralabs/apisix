@@ -4,12 +4,31 @@
 -- Run with: busted tests/test_config.lua
 --
 
+-- Mock apisix.core BEFORE requiring the module
+package.preload["apisix.core"] = function()
+    return {
+        log = {
+            info = function() end,
+            warn = function() end,
+            error = function() end,
+            debug = function() end,
+        },
+        table = {
+            clone = function(t)
+                local copy = {}
+                for k, v in pairs(t) do copy[k] = v end
+                return copy
+            end
+        }
+    }
+end
+
 describe("config module", function()
     local config_mod
     local lfs
 
     setup(function()
-        -- Mock dependencies
+        -- Mock ngx
         _G.ngx = {
             log = function() end,
             INFO = 1,
