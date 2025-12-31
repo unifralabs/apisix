@@ -27,6 +27,9 @@ _M.TYPE_CU_PRICING = "cu_pricing"
 -- Default TTL for cached configs (seconds)
 local DEFAULT_TTL = 60
 
+-- Optional per-type TTL overrides (compatibility API)
+local type_ttl = {}
+
 -- Module-level config cache (not per-request, for better performance)
 local module_cache = {}
 
@@ -47,7 +50,11 @@ end
 local function load_yaml_file(path)
     local file, err = io.open(path, "r")
     if not file then
-        return nil, "failed to open file: " .. (err or "unknown")
+        local err_msg = err or "unknown"
+        if err_msg:lower():find("no such file") or err_msg:lower():find("not found") then
+            return nil, "file not found: " .. path
+        end
+        return nil, "failed to open file: " .. err_msg
     end
 
     local content = file:read("*a")
@@ -102,8 +109,10 @@ function _M.load(ctx, config_type, config_path, ttl, force_reload)
     local route_id = get_route_id(ctx)
     local cache_key = get_cache_key(route_id, config_type, config_path)
 
-    -- Use provided TTL or default (no global override to avoid cross-route interference)
-    ttl = ttl or DEFAULT_TTL
+    -- Use provided TTL or configured default
+    if ttl == nil then
+        ttl = type_ttl[config_type] or DEFAULT_TTL
+    end
 
     -- Check module-level cache (shared across workers)
     local cached = module_cache[cache_key]
@@ -261,6 +270,25 @@ function _M.clear_cache(config_type)
         end
     end
     core.log.info("Cleared ", cleared, " config cache entries for type: ", config_type)
+end
+
+
+--- Set default TTL for a configuration type (compatibility API)
+-- @param config_type string Configuration type
+-- @param ttl number TTL in seconds
+function _M.set_ttl(config_type, ttl)
+    if not config_type or type(ttl) ~= "number" then
+        return
+    end
+    type_ttl[config_type] = ttl
+end
+
+
+--- Get default TTL for a configuration type (compatibility API)
+-- @param config_type string Configuration type
+-- @return number TTL in seconds
+function _M.get_ttl(config_type)
+    return type_ttl[config_type] or DEFAULT_TTL
 end
 
 

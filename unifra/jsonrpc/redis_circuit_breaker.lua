@@ -16,10 +16,10 @@ local _M = {
     version = "1.0.0"
 }
 
--- Circuit breaker states
-local STATE_CLOSED = "closed"
-local STATE_OPEN = "open"
-local STATE_HALF_OPEN = "half_open"
+-- Circuit breaker states (public API uses uppercase strings)
+local STATE_CLOSED = "CLOSED"
+local STATE_OPEN = "OPEN"
+local STATE_HALF_OPEN = "HALF_OPEN"
 
 -- Circuit breakers (one per Redis host:port)
 -- Format: { [host:port] = { state, failure_count, last_failure_time, success_count } }
@@ -28,11 +28,16 @@ local circuit_breakers = {}
 -- Configuration (can be overridden)
 local config = {
     failure_threshold = 5,           -- Failures to trip circuit
-    success_threshold = 2,           -- Successes in half-open to close circuit
-    timeout = 30,                    -- Seconds to wait before half-open
+    success_threshold = 1,           -- Successes in half-open to close circuit
+    open_timeout = 60,               -- Seconds to wait before half-open
+    timeout = 60,                    -- Backwards-compatible alias for open_timeout
     half_open_max_calls = 3,         -- Max concurrent calls in half-open state
     failure_window = 60,             -- Time window for counting failures (seconds)
 }
+
+local function get_open_timeout()
+    return config.open_timeout or config.timeout or 60
+end
 
 
 --- Get circuit breaker key for Redis connection
@@ -59,6 +64,20 @@ local function init_breaker(key)
 end
 
 
+--- Transition from OPEN to HALF_OPEN if timeout elapsed
+-- @param breaker table Circuit breaker state
+-- @param key string Circuit breaker key
+-- @param now number Current time in seconds
+local function maybe_transition_to_half_open(breaker, key, now)
+    if breaker.state == STATE_OPEN and (now - breaker.last_failure_time) >= get_open_timeout() then
+        breaker.state = STATE_HALF_OPEN
+        breaker.half_open_calls = 0
+        breaker.success_count = 0
+        core.log.info("Circuit breaker transitioning to HALF_OPEN: ", key)
+    end
+end
+
+
 --- Check if circuit breaker allows request
 -- @param redis_conf table Redis configuration
 -- @return boolean true if allowed
@@ -68,24 +87,19 @@ function _M.allow_request(redis_conf)
     local breaker = init_breaker(key)
     local now = ngx.now()
 
+    maybe_transition_to_half_open(breaker, key, now)
+
     if breaker.state == STATE_CLOSED then
         -- Normal operation
         return true, STATE_CLOSED
+    end
 
-    elseif breaker.state == STATE_OPEN then
-        -- Check if timeout expired, transition to half-open
-        if (now - breaker.last_failure_time) >= config.timeout then
-            breaker.state = STATE_HALF_OPEN
-            breaker.half_open_calls = 0
-            breaker.success_count = 0
-            core.log.info("Circuit breaker transitioning to HALF_OPEN: ", key)
-            return true, STATE_HALF_OPEN
-        end
-
+    if breaker.state == STATE_OPEN then
         -- Circuit still open, reject
         return false, STATE_OPEN
+    end
 
-    elseif breaker.state == STATE_HALF_OPEN then
+    if breaker.state == STATE_HALF_OPEN then
         -- Limit concurrent calls in half-open state
         if breaker.half_open_calls >= config.half_open_max_calls then
             return false, STATE_HALF_OPEN
@@ -107,7 +121,9 @@ function _M.record_success(redis_conf)
 
     if breaker.state == STATE_HALF_OPEN then
         breaker.success_count = breaker.success_count + 1
-        breaker.half_open_calls = breaker.half_open_calls - 1
+        if breaker.half_open_calls > 0 then
+            breaker.half_open_calls = breaker.half_open_calls - 1
+        end
 
         -- Enough successes, close circuit
         if breaker.success_count >= config.success_threshold then
@@ -227,6 +243,8 @@ function _M.get_status(redis_conf)
         }
     end
 
+    maybe_transition_to_half_open(breaker, key, ngx.now())
+
     return {
         state = breaker.state,
         failure_count = breaker.failure_count,
@@ -234,6 +252,15 @@ function _M.get_status(redis_conf)
         last_failure_time = breaker.last_failure_time,
         half_open_calls = breaker.half_open_calls,
     }
+end
+
+
+--- Get circuit breaker state (compatibility API for tests)
+-- @param redis_conf table Redis configuration
+-- @return string state Current circuit state (CLOSED/OPEN/HALF_OPEN)
+function _M.get_state(redis_conf)
+    local status = _M.get_status(redis_conf)
+    return status.state
 end
 
 
@@ -246,6 +273,12 @@ function _M.reset(redis_conf)
 end
 
 
+--- Reset all circuit breakers (for testing)
+function _M.reset_all()
+    circuit_breakers = {}
+end
+
+
 --- Configure circuit breaker
 -- @param new_config table Configuration overrides
 function _M.configure(new_config)
@@ -253,6 +286,13 @@ function _M.configure(new_config)
         if config[k] ~= nil then
             config[k] = v
         end
+    end
+
+    -- Keep timeout aliases in sync
+    if new_config.open_timeout ~= nil then
+        config.timeout = new_config.open_timeout
+    elseif new_config.timeout ~= nil then
+        config.open_timeout = new_config.timeout
     end
 end
 
