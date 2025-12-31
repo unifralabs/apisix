@@ -26,6 +26,8 @@ services:
     depends_on:
       - etcd
       - redis
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       # Mount Unifra plugins (repo root is the plugin directory)
       - ..:/opt/unifra-apisix:ro
