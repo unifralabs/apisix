@@ -46,6 +46,8 @@ describe("redis_circuit_breaker module", function()
     before_each(function()
         -- Reset circuit breaker state
         circuit_breaker.reset_all()
+        -- Reset time between tests to avoid cross-test leakage
+        _G.ngx.now = function() return 1000000 end
     end)
 
     describe("state transitions", function()
