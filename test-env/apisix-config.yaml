@@ -3,6 +3,7 @@
 #
 
 apisix:
+  strip_url_port: true
   node_listen: 9080
   enable_ipv6: false
   enable_admin: true
@@ -10,7 +11,7 @@ apisix:
     - name: admin
       key: unifra-test-admin-key
       role: admin
-
+  
   # CRITICAL: Load Unifra plugins from external directory
   extra_lua_path: "/opt/unifra-apisix/?.lua"
 
@@ -24,14 +25,21 @@ plugins:
   - unifra-limit-monthly-cu # 1011  - Monthly quota
   - unifra-limit-cu         # 1010  - Rate limiting
   - unifra-ws-jsonrpc-proxy # 999   - WebSocket
+  - unifra-key-auth         # 27000 - Key extraction
 
   # APISIX native plugins
   - proxy-rewrite
   - key-auth
   - limit-conn
   - limit-count
+  - limit-req
   - prometheus
   - http-logger
+  - cors
+  - redirect
+  - response-rewrite
+  - kafka-logger
+  - real-ip
 
 # etcd configuration
 deployment:
@@ -50,6 +58,7 @@ deployment:
         role: admin
     allow_admin:
       - 0.0.0.0/0  # Allow all IPs (for testing only!)
+    enable_admin_ui: true
 
 # Logging
 nginx_config:
