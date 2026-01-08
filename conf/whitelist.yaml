@@ -549,3 +549,11 @@ networks:
       - subscribe
       - unsubscribe
     paid: []
+
+  staging-dogeos-testnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+    paid:
+      - debug_*

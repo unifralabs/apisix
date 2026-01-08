@@ -116,7 +116,8 @@ function _M.rewrite(conf, ctx)
         ctx.var.unifra_original_uri = uri
 
         -- Set new URI (this affects upstream proxying)
-        ngx.var.uri = remaining_path
+        -- ngx.var.uri = remaining_path
+        ngx.req.set_uri(remaining_path)
 
         -- Sync ctx.var.uri to maintain cache consistency
         -- (later plugins may read ctx.var.uri and expect the rewritten value)
