@@ -433,6 +433,16 @@ networks:
     paid:
       - debug_*
 
+  bsc-mainnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+    paid:
+      - debug_*
+      - parlia_getValidators
+      - parlia_getSnapshot
+
   # =====================
   # Staging Networks (mirror of production)
   # =====================
@@ -557,3 +567,14 @@ networks:
       - eth_*
     paid:
       - debug_*
+
+  staging-bsc-mainnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+    paid:
+      - debug_*
+      - parlia_getValidators
+      - parlia_getSnapshot
+
