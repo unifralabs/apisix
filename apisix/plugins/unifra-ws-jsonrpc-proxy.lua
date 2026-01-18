@@ -182,7 +182,7 @@ local function check_message(conf, ctx, data)
     local redis_database = conf.redis_database or meta_conf.redis_database
     local redis_timeout = conf.redis_timeout or meta_conf.redis_timeout
 
-    local whitelist_config, wl_load_err = config_mod.load_whitelist(ctx, whitelist_path)
+    local whitelist_config, wl_load_err = whitelist_mod.load_config(ctx, whitelist_path)
     if not whitelist_config then
         core.log.error("ws: failed to load whitelist: ", wl_load_err)
         return 500, jsonrpc.error_response(jsonrpc.ERROR_INTERNAL, "config load failed", nil)
