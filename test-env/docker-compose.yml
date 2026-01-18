@@ -132,7 +132,9 @@ services:
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
     networks:
-      - apisix-net
+      apisix-net:
+        aliases:
+          - apisix-kafka
     volumes:
       - kafka_data:/var/lib/kafka/data
     healthcheck:
