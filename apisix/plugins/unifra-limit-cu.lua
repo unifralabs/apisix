@@ -4,7 +4,7 @@
 -- Enforces CU-based rate limiting per time window (default: per second).
 -- Uses Redis for distributed rate limiting across multiple APISIX instances.
 --
--- Priority: 1010 (runs after CU calculation)
+-- Priority: 1011 (runs after CU calculation)
 --
 
 local core = require("apisix.core")

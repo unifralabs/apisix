@@ -4,7 +4,7 @@
 -- Enforces monthly CU quota limits.
 -- Checks if the user has exceeded their monthly allocation.
 --
--- Priority: 1011 (runs after CU calculation, before per-second limit)
+-- Priority: 1010 (runs after CU calculation, before per-second limit)
 --
 
 local core = require("apisix.core")
