@@ -34,40 +34,10 @@ local plugin_name = "unifra-ws-jsonrpc-proxy"
 local schema = {
     type = "object",
     properties = {
-        -- Whitelist configuration
-        whitelist_config_path = {
-            type = "string",
-            default = "/opt/unifra-apisix/conf/whitelist.yaml"
-        },
-        -- CU configuration
-        cu_config_path = {
-            type = "string",
-            default = "/opt/unifra-apisix/conf/cu-pricing.yaml"
-        },
         -- Rate limit configuration
         enable_rate_limit = {
             type = "boolean",
             default = true
-        },
-        redis_host = {
-            type = "string",
-            default = "127.0.0.1"
-        },
-        redis_port = {
-            type = "integer",
-            default = 6379
-        },
-        redis_password = {
-            type = "string",
-            default = ""
-        },
-        redis_database = {
-            type = "integer",
-            default = 0
-        },
-        redis_timeout = {
-            type = "integer",
-            default = 1000
         },
         -- Timeout
         ws_timeout = {
@@ -100,11 +70,48 @@ local schema = {
     },
 }
 
+local metadata_schema = {
+    type = "object",
+    properties = {
+        -- Whitelist configuration
+        whitelist_config_path = {
+            type = "string",
+            default = "/opt/unifra-apisix/conf/whitelist.yaml"
+        },
+        -- CU configuration
+        cu_config_path = {
+            type = "string",
+            default = "/opt/unifra-apisix/conf/cu-pricing.yaml"
+        },
+        redis_host = {
+            type = "string",
+            default = "127.0.0.1"
+        },
+        redis_port = {
+            type = "integer",
+            default = 6379
+        },
+        redis_password = {
+            type = "string",
+            default = ""
+        },
+        redis_database = {
+            type = "integer",
+            default = 0
+        },
+        redis_timeout = {
+            type = "integer",
+            default = 1000
+        },
+    }
+}
+
 local _M = {
     version = 0.1,
     priority = 999,
     name = plugin_name,
     schema = schema,
+    metadata_schema = metadata_schema,
 }
 
 -- Use unified config module with per-route caching and hot reload support
@@ -152,13 +159,36 @@ local function check_message(conf, ctx, data)
 
     -- Load configs using unified config module (supports hot reload)
     -- Uses per-route caching with TTL-based refresh
-    local whitelist_config, wl_load_err = config_mod.load_whitelist(ctx, conf.whitelist_config_path)
+    
+    -- Load Metadata
+    local plugin_mod = require("apisix.plugin")
+    local metadata = plugin_mod.plugin_metadata(plugin_name)
+    local meta_conf = metadata and metadata.value or {}
+    
+    -- Ensure defaults are populated from metadata_schema even if meta_conf is empty
+    -- core.schema.check will populate default values into meta_conf
+    local valid, err = core.schema.check(metadata_schema, meta_conf)
+    if not valid then
+        core.log.error("ws: failed to validate metadata: ", err)
+    end
+    
+    -- Configuration Hierarchy: Route Config > Plugin Metadata (with defaults)
+    local whitelist_path = conf.whitelist_config_path or meta_conf.whitelist_config_path
+    local cu_path = conf.cu_config_path or meta_conf.cu_config_path
+    
+    local redis_host = conf.redis_host or meta_conf.redis_host
+    local redis_port = conf.redis_port or meta_conf.redis_port
+    local redis_password = conf.redis_password or meta_conf.redis_password
+    local redis_database = conf.redis_database or meta_conf.redis_database
+    local redis_timeout = conf.redis_timeout or meta_conf.redis_timeout
+
+    local whitelist_config, wl_load_err = config_mod.load_whitelist(ctx, whitelist_path)
     if not whitelist_config then
         core.log.error("ws: failed to load whitelist: ", wl_load_err)
         return 500, jsonrpc.error_response(jsonrpc.ERROR_INTERNAL, "config load failed", nil)
     end
 
-    local cu_config, cu_load_err = config_mod.load_cu_pricing(ctx, conf.cu_config_path)
+    local cu_config, cu_load_err = config_mod.load_cu_pricing(ctx, cu_path)
     if not cu_config then
         core.log.error("ws: failed to load CU pricing: ", cu_load_err)
         return 500, jsonrpc.error_response(jsonrpc.ERROR_INTERNAL, "config load failed", nil)
@@ -186,11 +216,11 @@ local function check_message(conf, ctx, data)
         local consumer_name = ctx.var.consumer_name
         if consumer_name then
             local redis_conf = {
-                host = conf.redis_host,
-                port = conf.redis_port,
-                password = conf.redis_password,
-                database = conf.redis_database,
-                timeout = conf.redis_timeout,
+                host = redis_host,
+                port = redis_port,
+                password = redis_password,
+                database = redis_database,
+                timeout = redis_timeout,
             }
 
             local allowed, used, remaining, quota_err = billing.check_and_increment(
@@ -225,11 +255,11 @@ local function check_message(conf, ctx, data)
             local key_value = ctx.var.consumer_name or ctx.var.remote_addr
 
             local redis_conf = {
-                host = conf.redis_host,
-                port = conf.redis_port,
-                password = conf.redis_password,
-                database = conf.redis_database,
-                timeout = conf.redis_timeout,
+                host = redis_host,
+                port = redis_port,
+                password = redis_password,
+                database = redis_database,
+                timeout = redis_timeout,
             }
 
             -- Generate unique request ID for ZSET

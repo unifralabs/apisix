@@ -37,28 +37,12 @@ local schema = {
             description = "Variable name for rate limit key"
         },
 
-        -- Redis configuration
-        redis_host = {
-            type = "string",
-            default = "127.0.0.1"
-        },
-        redis_port = {
-            type = "integer",
-            default = 6379
-        },
-        redis_password = {
-            type = "string",
-            default = ""
-        },
-        redis_database = {
-            type = "integer",
-            default = 0
-        },
-        redis_timeout = {
-            type = "integer",
-            default = 1000,
-            description = "Redis timeout in milliseconds"
-        },
+        -- Redis configuration (Optional override)
+        redis_host = { type = "string" },
+        redis_port = { type = "integer" },
+        redis_password = { type = "string" },
+        redis_database = { type = "integer" },
+        redis_timeout = { type = "integer" },
 
         -- Response configuration
         rejected_code = {
@@ -82,7 +66,32 @@ local schema = {
             description = "Show X-RateLimit-* headers"
         },
     },
-    required = { "redis_host" },
+}
+
+local metadata_schema = {
+    type = "object",
+    properties = {
+        redis_host = {
+            type = "string",
+            default = "127.0.0.1"
+        },
+        redis_port = {
+            type = "integer",
+            default = 6379,
+        },
+        redis_password = {
+            type = "string",
+            default = "",
+        },
+        redis_database = {
+            type = "integer",
+            default = 0,
+        },
+        redis_timeout = {
+            type = "integer",
+            default = 1000,
+        },
+    }
 }
 
 local _M = {
@@ -90,6 +99,7 @@ local _M = {
     priority = 1011,
     name = plugin_name,
     schema = schema,
+    metadata_schema = metadata_schema,
 }
 
 
@@ -123,12 +133,26 @@ end
 
 --- Sliding window rate limiting (new, recommended)
 function _M.sliding_window_check(conf, ctx, cu, limit, key_value)
+    -- Explicitly require the plugin module since core.plugin seems unavailable here
+    local core = require("apisix.core")
+    local plugin_mod = require("apisix.plugin")
+    
+    -- Load Metadata
+    local metadata = plugin_mod.plugin_metadata(plugin_name)
+    local meta_conf = metadata and metadata.value or {}
+    
+    -- Ensure defaults are populated from metadata_schema
+    local valid, err = core.schema.check(metadata_schema, meta_conf)
+    if not valid then
+        core.log.error("limit-cu: failed to validate metadata: ", err)
+    end
+
     local redis_conf = {
-        host = conf.redis_host,
-        port = conf.redis_port,
-        password = conf.redis_password,
-        database = conf.redis_database,
-        timeout = conf.redis_timeout,
+        host = conf.redis_host or meta_conf.redis_host,
+        port = conf.redis_port or meta_conf.redis_port,
+        password = conf.redis_password or meta_conf.redis_password,
+        database = conf.redis_database or meta_conf.redis_database,
+        timeout = conf.redis_timeout or meta_conf.redis_timeout,
     }
 
     -- Generate unique request ID for ZSET

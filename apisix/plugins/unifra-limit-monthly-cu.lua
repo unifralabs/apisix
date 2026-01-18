@@ -27,7 +27,27 @@ local schema = {
             default = "quota_key",
             description = "Variable name for quota key (user_id for shared quotas). Falls back to consumer_name if not set."
         },
-        -- Redis configuration for atomic quota tracking
+        -- Redis configuration (Optional override)
+        redis_host = { type = "string" },
+        redis_port = { type = "integer" },
+        redis_password = { type = "string" },
+        redis_database = { type = "integer" },
+        redis_timeout = { type = "integer" },
+        
+        rejected_code = {
+            type = "integer",
+            default = 429,
+        },
+        rejected_msg = {
+            type = "string",
+            default = "monthly quota exceeded",
+        },
+    },
+}
+
+local metadata_schema = {
+    type = "object",
+    properties = {
         redis_host = {
             type = "string",
             default = "127.0.0.1",
@@ -48,16 +68,7 @@ local schema = {
             type = "integer",
             default = 1000,
         },
-        rejected_code = {
-            type = "integer",
-            default = 429,
-        },
-        rejected_msg = {
-            type = "string",
-            default = "monthly quota exceeded",
-        },
-    },
-    required = {"redis_host"},
+    }
 }
 
 local _M = {
@@ -65,6 +76,7 @@ local _M = {
     priority = 1010,
     name = plugin_name,
     schema = schema,
+    metadata_schema = metadata_schema,
 }
 
 
@@ -101,13 +113,24 @@ function _M.access(conf, ctx)
     -- Get CU for this request
     local cu = tonumber(ctx.var.cu) or 1
 
-    -- Build Redis configuration
+    -- Load Metadata
+    local plugin_mod = require("apisix.plugin")
+    local metadata = plugin_mod.plugin_metadata(plugin_name)
+    local meta_conf = metadata and metadata.value or {}
+    
+    -- Ensure defaults are populated from metadata_schema
+    local valid, err = core.schema.check(metadata_schema, meta_conf)
+    if not valid then
+        core.log.error("limit-monthly-cu: failed to validate metadata: ", err)
+    end
+
+    -- Build Redis configuration (Route > Metadata > Default)
     local redis_conf = {
-        host = conf.redis_host,
-        port = conf.redis_port,
-        password = conf.redis_password,
-        database = conf.redis_database,
-        timeout = conf.redis_timeout,
+        host = conf.redis_host or meta_conf.redis_host,
+        port = conf.redis_port or meta_conf.redis_port,
+        password = conf.redis_password or meta_conf.redis_password,
+        database = conf.redis_database or meta_conf.redis_database,
+        timeout = conf.redis_timeout or meta_conf.redis_timeout,
     }
 
     -- Atomic check-and-increment via billing module
