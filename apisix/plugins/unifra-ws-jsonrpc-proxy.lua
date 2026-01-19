@@ -24,6 +24,8 @@ local config_mod = require("unifra.jsonrpc.config")
 local billing = require("unifra.jsonrpc.billing")
 local errors = require("unifra.jsonrpc.errors")
 local metrics = require("unifra.metrics")
+local batch_processor = require("apisix.utils.batch-processor")
+local producer = require("resty.kafka.producer")
 
 local ngx = ngx
 local ipairs = ipairs
@@ -67,6 +69,29 @@ local schema = {
             type = "string",
             description = "Override network name instead of extracting from host"
         },
+        -- Kafka configuration overrides (optional)
+        kafka_brokers = {
+            type = "array",
+            items = {
+                type = "object",
+                properties = {
+                    host = { type = "string" },
+                    port = { type = "integer" },
+                },
+                required = { "host", "port" }
+            }
+        },
+        kafka_topic = {
+            type = "string"
+        },
+        kafka_producer_config = {
+            type = "object",
+            properties = {
+                producer_type = { type = "string", enum = {"async", "sync"} },
+                refresh_interval = { type = "integer" },
+                required_acks = { type = "integer" },
+            }
+        }
     },
 }
 
@@ -103,6 +128,38 @@ local metadata_schema = {
             type = "integer",
             default = 1000
         },
+        -- Kafka configuration
+        kafka_brokers = {
+            type = "array",
+            items = {
+                type = "object",
+                properties = {
+                    host = { type = "string" },
+                    port = { type = "integer" },
+                },
+                required = { "host", "port" }
+            },
+            default = {
+                { host = "kafka", port = 9092 }
+            }
+        },
+        kafka_topic = {
+            type = "string",
+            default = "unifra-ws-logs"
+        },
+        kafka_producer_config = {
+            type = "object",
+            properties = {
+                producer_type = { type = "string", enum = {"async", "sync"}, default = "async" },
+                refresh_interval = { type = "integer", default = 1000 },
+                required_acks = { type = "integer", default = 1 },
+            },
+            default = {
+                producer_type = "async",
+                refresh_interval = 1000,
+                required_acks = 1
+            }
+        }
     }
 }
 
@@ -213,8 +270,14 @@ local function check_message(conf, ctx, data)
     -- Monthly quota check (atomic via billing module)
     local quota = tonumber(ctx.var.monthly_quota)
     if quota and quota > 0 then
-        local consumer_name = ctx.var.consumer_name
-        if consumer_name then
+        -- Use shared quota key (user_id) if available, fallback to consumer_name (api_key)
+        -- This ensures consistency with HTTP monthly limit plugin
+        local quota_key = ctx.var.quota_key
+        if not quota_key or quota_key == "" then
+            quota_key = ctx.var.consumer_name
+        end
+
+        if quota_key then
             local redis_conf = {
                 host = redis_host,
                 port = redis_port,
@@ -224,7 +287,7 @@ local function check_message(conf, ctx, data)
             }
 
             local allowed, used, remaining, quota_err = billing.check_and_increment(
-                redis_conf, ctx, consumer_name, total_cu, quota
+                redis_conf, ctx, quota_key, total_cu, quota
             )
 
             if quota_err then
@@ -237,7 +300,7 @@ local function check_message(conf, ctx, data)
             end
 
             if not allowed then
-                core.log.warn("ws monthly quota exceeded: consumer=", consumer_name,
+                core.log.warn("ws monthly quota exceeded: key=", quota_key,
                               ", used=", used, ", quota=", quota)
                 return 429, jsonrpc.error_response(
                     jsonrpc.ERROR_QUOTA_EXCEEDED,
@@ -355,6 +418,128 @@ local function check_message(conf, ctx, data)
 end
 
 
+-- Batch processor for Kafka logging
+local buffers = {}
+
+local function get_batch_processor(metadata, route_conf)
+    local meta_conf = metadata and metadata.value or {}
+    
+    -- Ensure defaults
+    local valid, err = core.schema.check(metadata_schema, meta_conf)
+    if not valid then
+        core.log.error("ws: failed to check metadata for kafka: ", err)
+        return nil
+    end
+
+    -- Priority: Route Config > Metadata Config
+    local brokers = route_conf and route_conf.kafka_brokers or meta_conf.kafka_brokers
+    local topic = route_conf and route_conf.kafka_topic or meta_conf.kafka_topic
+    local prod_conf = route_conf and route_conf.kafka_producer_config or meta_conf.kafka_producer_config
+
+    -- Cache key must include broker hash to prevent collision if different routes
+    -- use different brokers/producer configs for the same topic (edge case)
+    -- Simplified key: plugin_name # topic # broker_list_hash
+    
+    local broker_list = {}
+    for _, b in ipairs(brokers) do
+        table.insert(broker_list, { host = b.host, port = b.port })
+    end
+    
+    local key = "ws_logger:" .. (topic or "default") .. ":" .. core.json.encode(broker_list)
+    
+    if buffers[key] then
+        return buffers[key]
+    end
+
+    local buffer_config = {
+        name = "unifra-ws-logger",
+        retry_delay = 1,
+        batch_max_size = 500,
+        max_retry_count = 3,
+        buffer_duration = 1,
+        inactive_timeout = 2,
+    }
+
+    local function flush_to_kafka(entries)
+        local broker_list = {}
+        for _, b in ipairs(brokers) do
+            table.insert(broker_list, { host = b.host, port = b.port })
+        end
+
+        core.log.warn("ws: flushing " .. #entries .. " logs to kafka topic: " .. topic)
+
+        local p = producer:new(broker_list, prod_conf)
+        
+        for _, entry in ipairs(entries) do
+            local json_str = core.json.encode(entry)
+            core.log.info("ws: sending log to kafka: ", json_str)
+            
+            local ok, err = p:send(topic, nil, json_str)
+            if not ok then
+                core.log.error("ws: failed to send log to kafka: ", err)
+            else
+                core.log.info("ws: successfully sent log to kafka")
+            end
+        end
+        return true
+    end
+
+    local bp, err = batch_processor:new(flush_to_kafka, buffer_config)
+    if not bp then
+        core.log.error("ws: failed to create batch processor: ", err)
+        return nil
+    end
+
+    buffers[key] = bp
+    return bp
+end
+
+
+local function log_jsonrpc(ctx, conf, base_info, log_details)
+    -- Load metadata to get Kafka config
+    local plugin_mod = require("apisix.plugin")
+    local metadata = plugin_mod.plugin_metadata(plugin_name)
+    
+    local bp = get_batch_processor(metadata, conf)
+    if not bp then
+        return
+    end
+
+    local request_data = log_details.request_data or ""
+    local response_data = log_details.response_data or ""
+    local duration = log_details.duration or 0
+    local status = log_details.status or 200
+    local extra_info = log_details.extra_info or {}
+    
+    -- Use captured base info
+    local user_id = base_info.user_id or ""
+    local app_id = base_info.app_id or ""
+    local network = base_info.network or (extra_info and extra_info.network) or ""
+    
+    local log_entry = {
+        user_id = user_id,
+        app_id = app_id,
+        network = network,
+        duration = duration,
+        request = request_data,
+        response = response_data,
+        client_ip = ctx.var.remote_addr,
+        response_status_code = status,
+        time = ngx.now(),
+        
+        -- Extra fields for detailed debugging/metrics
+        cu_cost = extra_info.cu_cost,
+        node_id = core.utils.gethostname(),
+        service_id = ctx.var.service_id,
+        route_id = ctx.var.route_id,
+        request_id = extra_info.request_id,
+    }
+
+    core.log.info("ws: queuing jsonrpc log: ", core.json.encode(log_entry), " user_id=", user_id)
+    bp:push(log_entry)
+end
+
+
 function _M.access(conf, ctx)
     -- Case-insensitive WebSocket upgrade check
     -- Handles "Websocket", "WebSocket", "WEBSOCKET", etc. properly
@@ -364,6 +549,18 @@ function _M.access(conf, ctx)
     end
 
     core.log.info("ws-jsonrpc-proxy: intercepting WebSocket for ", ctx.var.host)
+
+    -- Capture Context Variables Early
+    -- This avoids thread scope issues and repeated lookups
+    local network = conf.network or jsonrpc.extract_network(ctx.var.host)
+
+
+
+    local base_info = {
+        user_id = ctx.user_id or ctx.var.user_id or ctx.quota_key or ctx.var.quota_key or ctx.consumer_name or ctx.var.consumer_name,
+        app_id = ctx.app_id or ctx.var.app_id or ctx.consumer_name or ctx.var.consumer_name,
+        network = network
+    }
 
     -- Initialize upstream
     local route = ctx.matched_route
@@ -474,6 +671,11 @@ function _M.access(conf, ctx)
 
     core.log.info("ws-jsonrpc-proxy: client connected")
 
+    -- Shared state for correlating requests and responses
+    local inflight_requests = {}
+    local request_counter = 0
+    local cjson = require("cjson.safe")
+
     -- Spawn downstream thread (upstream -> client)
     local downstream_thread = ngx.thread.spawn(function()
         while true do
@@ -482,25 +684,80 @@ function _M.access(conf, ctx)
                 if err ~= "timeout" then
                     core.log.info("ws-jsonrpc-proxy: upstream closed: ", err or "unknown")
                     break
-                end
+                end;
                 goto continue
             end
 
-            local bytes, send_err
             if typ == "text" then
-                bytes, send_err = wb:send_text(data)
-            elseif typ == "binary" then
-                bytes, send_err = wb:send_binary(data)
-            elseif typ == "close" then
-                wb:send_close()
-                break
-            elseif typ == "ping" then
-                bytes, send_err = wb:send_pong(data)
+                -- Intercept response to rewrite ID and log
+                local json_resp = cjson.decode(data)
+                local req_ctx = nil
+                local rewritten = false
+                
+                -- Try to find matching request using Internal ID
+                if json_resp and json_resp.id then
+                    local internal_id_key = tostring(json_resp.id)
+                    req_ctx = inflight_requests[internal_id_key]
+                    
+                    if req_ctx then
+                        local end_time = ngx.now()
+                        local duration = end_time - req_ctx.start_time
+                        
+                        -- RESTORE Original ID in the response before sending to client
+                        json_resp.id = req_ctx.orig_id
+                        data = cjson.encode(json_resp) -- Re-encode with original ID
+                        rewritten = true
+                        
+                        log_jsonrpc(ctx, conf, base_info, {
+                            request_data = req_ctx.data,
+                            response_data = data,
+                            duration = duration,
+                            status = 200,
+                            extra_info = req_ctx.extra_info
+                        })
+                        
+                        -- Cleanup
+                        inflight_requests[internal_id_key] = nil
+                    else
+                        -- Unmatched response (timeout? or unsolicited? or batch?)
+                        -- If we didn't rewrite it (not found), pass through as is.
+                        log_jsonrpc(ctx, conf, base_info, {
+                            request_data = "", 
+                            response_data = data,
+                            duration = 0,
+                            status = 200,
+                            extra_info = { network = conf.network } 
+                        })
+                    end
+                elseif json_resp then
+                     -- Notification from upstream?
+                     log_jsonrpc(ctx, conf, base_info, {
+                        request_data = "",
+                        response_data = data,
+                        duration = 0,
+                        status = 200,
+                        extra_info = { network = conf.network }
+                    })
+                end
             end
 
-            if send_err then
-                core.log.error("ws-jsonrpc-proxy: send to client failed: ", send_err)
-                break
+            do
+                local bytes, send_err
+                if typ == "text" then
+                    bytes, send_err = wb:send_text(data)
+                elseif typ == "binary" then
+                    bytes, send_err = wb:send_binary(data)
+                elseif typ == "close" then
+                    wb:send_close()
+                    break
+                elseif typ == "ping" then
+                    bytes, send_err = wb:send_pong(data)
+                end
+
+                if send_err then
+                    core.log.error("ws-jsonrpc-proxy: send to client failed: ", send_err)
+                    break
+                end
             end
 
             ::continue::
@@ -516,7 +773,7 @@ function _M.access(conf, ctx)
             if err ~= "timeout" then
                 core.log.info("ws-jsonrpc-proxy: client closed: ", err or "unknown")
                 break
-            end
+            end;
             goto continue_loop
         end
 
@@ -531,14 +788,107 @@ function _M.access(conf, ctx)
         elseif typ == "text" then
             -- Check JSON-RPC message
             local status, error_resp = check_message(conf, ctx, data)
+            local network = conf.network or jsonrpc.extract_network(ctx.var.host)
 
             if status ~= 200 then
+                -- Log rejected request immediately
+                local json_data = cjson.decode(data)
+                local method_name = nil
+                local req_id = nil
+                
+                if json_data then
+                    if type(json_data) == "table" then
+                        if #json_data > 0 then
+                             method_name = "BATCH"
+                        else
+                             method_name = json_data.method
+                             req_id = json_data.id
+                        end
+                    end
+                end
+
+                log_jsonrpc(ctx, conf, base_info, {
+                    request_data = data,
+                    response_data = error_resp,
+                    duration = 0,
+                    status = status,
+                    extra_info = {
+                        network = network,
+                        method = method_name,
+                        request_id = req_id,
+                        error = error_resp
+                    }
+                })
+
                 wb:send_text(error_resp)
                 goto continue_loop
             end
 
-            -- Forward to upstream
-            local bytes, send_err = wc:send_text(data)
+            -- If successful (status == 200)
+            -- 1. Decode
+            -- 2. Rewrite ID (if applicable)
+            -- 3. Store Mapping
+            -- 4. Re-encode and Forward
+            
+            local json_ops = cjson.decode(data)
+            local method_name = "unknown"
+            local req_id = nil
+            local is_batch = false
+            
+            if json_ops then
+                 if json_ops.method then
+                    method_name = json_ops.method
+                    req_id = json_ops.id
+                 elseif #json_ops > 0 then
+                    method_name = "BATCH"
+                    is_batch = true
+                 end
+            end
+            
+            -- Prepare data to send (default to original)
+            local data_to_send = data
+
+            if req_id and not is_batch then
+                -- Generate Internal ID
+                request_counter = request_counter + 1
+                -- Use simple monotonic ID for this connection to save bytes
+                local internal_id = request_counter
+                local internal_id_str = tostring(internal_id)
+
+                -- Store mapping
+                inflight_requests[internal_id_str] = {
+                    start_time = ngx.now(),
+                    orig_id = req_id,       -- Keep original ID to restore later
+                    data = data,            -- Keep original Request Data for logging
+                    extra_info = {
+                        network = network,
+                        method = method_name,
+                        request_id = req_id,
+                        cu_cost = 0, 
+                    }
+                }
+                
+                -- Rewrite ID in JSON
+                json_ops.id = internal_id
+                data_to_send = cjson.encode(json_ops)
+            else
+                -- Notification or Batch
+                -- Log immediately as we don't track them with ID rewriting yet
+                log_jsonrpc(ctx, conf, base_info, {
+                    request_data = data,
+                    response_data = "", 
+                    duration = 0,
+                    status = 200,
+                    extra_info = {
+                        network = network,
+                        method = method_name,
+                        request_id = req_id,
+                    }
+                })
+            end
+
+            -- Forward (rewritten or original) to upstream
+            local bytes, send_err = wc:send_text(data_to_send)
             if not bytes then
                 core.log.error("ws-jsonrpc-proxy: send to upstream failed: ", send_err)
                 break

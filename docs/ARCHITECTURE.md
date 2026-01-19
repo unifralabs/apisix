@@ -500,3 +500,126 @@ Or via Prometheus metrics:
 unifra_consumer_monthly_used{consumer="user-a-uuid"} 850000
 unifra_consumer_monthly_quota{consumer="user-a-uuid"} 10000000
 ```
+
+---
+
+## 7. WebSocket Proxy Design
+
+### Man-in-the-Middle (MITM) Architecture
+
+Unlike standard HTTP proxying where APISIX simply forwards bytes, our WebSocket implementation acts as an intelligent Man-in-the-Middle to enable JSON-RPC inspection and rate limiting on a per-message basis.
+
+```
+┌──────────┐      WebSocket       ┌─────────────────────────┐      WebSocket       ┌──────────┐
+│          │  Upgrade (HTTP)      │  unifra-ws-jsonrpc-proxy│      (Client)        │          │
+│  Client  │ ───────────────────> │ (Server)       (Client) │ ───────────────────> │ Upstream │
+│          │ <─────────────────── │   │                ▲    │ <─────────────────── │  Node    │
+└──────────┘  101 Switching Prot  │   │                │    │                      └──────────┘
+                                  │   │                │    │
+                                  │   ▼                │    │
+                                  │  Thread 1     Thread 2  │
+                                  └─────────────────────────┘
+```
+
+### Dual-Thread Model
+
+The plugin spawns a lightweight thread (Lua coroutine) to handle full-duplex communication:
+
+1.  **Main Thread (Client -> Upstream)**:
+    *   Reads frames from the Client.
+    *   Parses JSON-RPC messages.
+    *   Applies **Rate Limits** (sliding window) and **Whitelist** checks.
+    *   Forwards valid messages to Upstream.
+    *   Stores request metadata (start time, CU cost) in an `inflight_requests` table using the JSON-RPC ID.
+
+2.  **Downstream Thread (Upstream -> Client)**:
+    *   Reads frames from Upstream.
+    *   Parses JSON-RPC responses.
+    *   **Correlates** responses with requests using the JSON-RPC ID.
+    *   Calculates latency (`now - start_time`).
+    *   Logs detailed metrics (latency, CU cost, status) to Kafka.
+    *   Forwards responses back to the Client.
+
+### ID Correlation & Context Capture
+
+To accurately bill and log WebSocket traffic, we must link responses to their original requests.
+
+*   **Problem**: WebSocket is asynchronous; responses can come in any order.
+*   **Solution**: We use the `id` field in JSON-RPC.
+    *   When sending a request, we store context in a Lua table: `inflight[id] = { start=..., cu=..., app_id=... }`.
+    *   When receiving a response, we look up `inflight[id]`.
+    *   This allows us to log "Request A took 50ms and cost 10 CU".
+
+### High-Performance Optimizations
+
+1.  **Context Pre-Capture**:
+    *   Instead of looking up `ctx.var.consumer_name` or `ctx.var.quota_key` for every single WebSocket message (which is expensive), we capture these values **once** during the WebSocket handshake phase.
+    *   These values are passed into the tight loops of the read/write threads.
+
+2.  **Circuit Breaker for Redis**:
+    *   Rate limiting relies on Redis. To prevent WebSocket latency spikes if Redis is slow, we wrap Redis calls in a circuit breaker.
+    *   If Redis fails, we fail-open (allow traffic) to preserve user experience, while logging the error.
+
+3.  **Kafka Batching**:
+    *   High-frequency WebSocket traffic generates massive logs.
+    *   We use a **Batch Processor** to buffer logs in memory and flush them to Kafka in chunks (e.g., every 500 entries or 1 second).
+    *   This drastically reduces I/O overhead compared to sending one Kafka message per WebSocket frame.
+
+### Plugin Execution Flow
+
+The WebSocket flow differs significantly from standard HTTP because continuous message processing happens *inside* the proxy loop, after the initial handshake.
+
+#### 1. Handshake Phase (Standard APISIX Chain)
+Client initiates `GET / HTTP/1.1 Upgrade: websocket`.
+
+```
+┌────────────────────────────────┐
+│ 1. unifra-jsonrpc-var (26000)  │  ◄ Context extraction (Network, Helper vars)
+└──────────────┬─────────────────┘
+               ▼
+┌────────────────────────────────┐
+│ 2. key-auth (2500)             │  ◄ API Key Validation
+└──────────────┬─────────────────┘
+               ▼
+┌────────────────────────────────┐
+│ 3. unifra-ctx-var (2400)       │  ◄ Load Quota & Limits for User
+└──────────────┬─────────────────┘
+               ▼
+┌────────────────────────────────┐
+│ 4. unifra-ws-jsonrpc-proxy (999)│ ◄ INTERCEPT HANDSHAKE
+└──────────────┬─────────────────┘
+               │  (Plugin takes over connection)
+               ▼
+        Connected to Upstream
+```
+
+#### 2. Message Phase (Inside Proxy Loop)
+For **EACH** WebSocket message frame:
+
+```
+┌────────────────────────────────┐
+│      Incoming Message          │
+└──────────────┬─────────────────┘
+               ▼
+┌────────────────────────────────┐
+│      JSON-RPC Parsing          │
+└──────────────┬─────────────────┘
+               ▼
+┌────────────────────────────────┐
+│      Whitelist Check           │  (Library Call: unifra.jsonrpc.whitelist)
+└──────────────┬─────────────────┘
+               ▼
+┌────────────────────────────────┐
+│      CU Calculation            │  (Library Call: unifra.jsonrpc.cu)
+└──────────────┬─────────────────┘
+               ▼
+┌────────────────────────────────┐
+│      Rate Limiting Check       │  (Library Call -> Redis Script)
+└──────────────┬─────────────────┘
+               ▼
+┌────────────────────────────────┐
+│      Forward to Upstream       │
+└────────────────────────────────┘
+```
+
+
