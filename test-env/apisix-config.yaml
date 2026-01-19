@@ -18,7 +18,7 @@ apisix:
 # Enable Unifra custom plugins
 plugins:
 plugins:      # plugin list (sorted by priority)
-#  - custom-ctx-var                 # priority: 24000
+#  - custom-ctx-var                 # priority: 2400
   #- env-to-ctx                # priority: 23001
   - real-ip                        # priority: 23000
   - ai                             # priority: 22900
@@ -113,28 +113,14 @@ plugins:      # plugin list (sorted by priority)
   - ext-plugin-post-resp           # priority: -4000
 
   # Unifra plugins (listed by priority, highest first)
+  - unifra-key-auth         # 27000 - Key extraction
   - unifra-jsonrpc-var      # 26000 - Parse JSON-RPC
-  - unifra-ctx-var          # 24000 - Consumer variables
+  - unifra-ctx-var          # 2400  - Consumer variables (must be < key-auth 2500)
   - unifra-whitelist        # 1900  - Access control
   - unifra-calculate-cu     # 1012  - CU calculation
-  - unifra-limit-monthly-cu # 1010  - Monthly quota
   - unifra-limit-cu         # 1011  - Rate limiting
+  - unifra-limit-monthly-cu # 1010  - Monthly quota
   - unifra-ws-jsonrpc-proxy # 999   - WebSocket
-  - unifra-key-auth         # 27000 - Key extraction
-
-  # APISIX native plugins
-  # - proxy-rewrite
-  # - key-auth
-  # - limit-conn
-  # - limit-count
-  # - limit-req
-  # - prometheus
-  # - http-logger
-  # - cors
-  # - redirect
-  # - response-rewrite
-  # - kafka-logger
-  # - real-ip
 
 # etcd configuration
 deployment:

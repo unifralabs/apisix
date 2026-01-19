@@ -96,7 +96,7 @@ curl -X POST https://eth-mainnet.unifra.io/v1/your-api-key \
 │  │           │                                                     │  │
 │  │  ┌────────▼─────────┐                                          │  │
 │  │  │ unifra-ctx-var   │ ─────► Inject consumer quotas            │  │
-│  │  │   (24000)        │                                          │  │
+│  │  │   (2400)        │                                          │  │
 │  │  └────────┬─────────┘                                          │  │
 │  │           │                                                     │  │
 │  │  ┌────────▼─────────┐                                          │  │

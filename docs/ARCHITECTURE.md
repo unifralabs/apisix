@@ -143,11 +143,11 @@ local var_mt = {
 unifra-apisix/                    # External directory (not in APISIX repo)
 ├── apisix/plugins/               # Plugin wrappers (APISIX plugin format)
 │   ├── unifra-jsonrpc-var.lua    # Priority 26000 - runs first
-│   ├── unifra-ctx-var.lua        # Priority 24000
+│   ├── unifra-ctx-var.lua        # Priority 2400
 │   ├── unifra-whitelist.lua      # Priority 1900
 │   ├── unifra-calculate-cu.lua   # Priority 1012
-│   ├── unifra-limit-monthly-cu.lua # Priority 1011
-│   ├── unifra-limit-cu.lua       # Priority 1010
+│   ├── unifra-limit-cu.lua       # Priority 1011
+│   ├── unifra-limit-monthly-cu.lua # Priority 1010
 │   └── unifra-ws-jsonrpc-proxy.lua # Priority 999
 ├── unifra/jsonrpc/               # Core business logic (reusable modules)
 │   ├── core.lua                  # JSON-RPC parsing
@@ -200,7 +200,7 @@ Request arrives
       │
       ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  unifra-ctx-var (24000)                                         │
+│  unifra-ctx-var (2400)                                         │
 │  - Inject consumer-specific variables                           │
 │  - Set seconds_quota, monthly_quota, quota_key                  │
 └─────────────────────────────────────────────────────────────────┘
@@ -222,17 +222,17 @@ Request arrives
       │
       ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  unifra-limit-monthly-cu (1011)                                 │
-│  - Check if monthly quota exceeded                              │
-│  - Reject if over limit                                         │
+│  unifra-limit-cu (1011)                                         │
+│  - Per-second rate limiting via Redis                           │
+│  - Uses sliding window algorithm                                │
+│  - Reject if rate exceeded                                      │
 └─────────────────────────────────────────────────────────────────┘
       │
       ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  unifra-limit-cu (1010)                                         │
-│  - Per-second rate limiting via Redis                           │
-│  - Uses sliding window algorithm                                │
-│  - Reject if rate exceeded                                      │
+│  unifra-limit-monthly-cu (1010)                                 │
+│  - Check if monthly quota exceeded                              │
+│  - Reject if over limit                                         │
 └─────────────────────────────────────────────────────────────────┘
       │
       ▼
@@ -251,11 +251,11 @@ Request arrives
 | Plugin | Priority | Reason |
 |--------|----------|--------|
 | unifra-jsonrpc-var | 26000 | Must parse body before anything else reads it |
-| unifra-ctx-var | 24000 | Consumer vars needed for quota checks |
+| unifra-ctx-var | 2400 | Consumer vars needed for quota checks |
 | unifra-whitelist | 1900 | Reject invalid methods early |
 | unifra-calculate-cu | 1012 | CU needed for rate limiting |
-| unifra-limit-monthly-cu | 1011 | Monthly check before per-second |
-| unifra-limit-cu | 1010 | Final rate limit check |
+| unifra-limit-cu | 1011 | Final rate limit check |
+| unifra-limit-monthly-cu | 1010 | Monthly check after per-second |
 | unifra-ws-jsonrpc-proxy | 999 | WebSocket runs in access phase, must be last |
 
 ---

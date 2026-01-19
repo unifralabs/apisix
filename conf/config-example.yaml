@@ -25,11 +25,11 @@ plugins:
   # IMPORTANT: Order matters - plugins run by priority (higher = earlier)
   - unifra-key-auth         # Priority: 27000 - Extract API key from URL path
   - unifra-jsonrpc-var      # Priority: 26000 - Parse JSON-RPC, inject variables
-  - unifra-ctx-var          # Priority: 24000 - Inject consumer variables (quota, etc.)
+  - unifra-ctx-var          # Priority: 2400 - Inject consumer variables (quota, etc.)
   - unifra-whitelist        # Priority: 1900  - Method access control
   - unifra-calculate-cu     # Priority: 1012  - Calculate compute units
-  - unifra-limit-monthly-cu # Priority: 1011  - Monthly quota check
-  - unifra-limit-cu         # Priority: 1010  - Per-second rate limiting
+  - unifra-limit-cu         # Priority: 1011  - Per-second rate limiting
+  - unifra-limit-monthly-cu # Priority: 1010  - Monthly quota check
   - unifra-ws-jsonrpc-proxy # Priority: 999   - WebSocket JSON-RPC proxy
 
   # ================================

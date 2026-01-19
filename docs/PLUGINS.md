@@ -18,11 +18,11 @@
 | Plugin | Priority | Phase | Description |
 |--------|----------|-------|-------------|
 | unifra-jsonrpc-var | 26000 | rewrite | Parse JSON-RPC, inject variables |
-| unifra-ctx-var | 24000 | rewrite | Inject consumer variables |
+| unifra-ctx-var | 2400 | rewrite | Inject consumer variables |
 | unifra-whitelist | 1900 | access | Method access control |
 | unifra-calculate-cu | 1012 | access | Compute unit calculation |
-| unifra-limit-monthly-cu | 1011 | access | Monthly quota enforcement |
-| unifra-limit-cu | 1010 | access | Per-second rate limiting |
+| unifra-limit-cu | 1011 | access | Per-second rate limiting |
+| unifra-limit-monthly-cu | 1010 | access | Monthly quota enforcement |
 | unifra-ws-jsonrpc-proxy | 999 | access | WebSocket proxy with per-message limits |
 
 ---
@@ -138,7 +138,7 @@ The plugin sets:
 
 ## unifra-ctx-var
 
-**Priority**: 24000
+**Priority**: 2400
 **Phase**: rewrite
 **Location**: `apisix/plugins/unifra-ctx-var.lua`
 
@@ -458,7 +458,7 @@ Sets `ctx.var.cu` with the total CU cost:
 
 ## unifra-limit-monthly-cu
 
-**Priority**: 1011
+**Priority**: 1010
 **Phase**: access
 **Location**: `apisix/plugins/unifra-limit-monthly-cu.lua`
 
@@ -516,7 +516,7 @@ Enforces monthly CU quotas per consumer.
 
 ## unifra-limit-cu
 
-**Priority**: 1010
+**Priority**: 1011
 **Phase**: access
 **Location**: `apisix/plugins/unifra-limit-cu.lua`
 

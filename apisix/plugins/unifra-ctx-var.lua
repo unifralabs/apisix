@@ -18,7 +18,7 @@
 --   }
 -- }
 --
--- Priority: 24000 (runs after key-auth (2500), before jsonrpc-var (26000))
+-- Priority: 2400 (runs after key-auth (2500), before jsonrpc-var (26000))
 -- Note: Priority is high but lower than jsonrpc-var to ensure variables
 -- are set before other Unifra plugins run.
 --
@@ -38,7 +38,7 @@ local schema = {
 
 local _M = {
     version = 0.1,
-    priority = 24000,  -- High priority, runs early but after auth
+    priority = 2400,  -- High priority, runs early but after auth
     name = plugin_name,
     schema = schema,
 }
@@ -59,7 +59,8 @@ function _M.access(conf, ctx)
         -- Skip meta keys
         if key ~= "_meta" and key ~= "disable" then
             ctx.var[key] = value
-            core.log.debug("unifra-ctx-var: set ", key, " = ", value)
+            ctx[key] = value -- Also store in Lua context for safety
+            core.log.info("unifra-ctx-var: set ", key, " = ", value)
         end
     end
 end

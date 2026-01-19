@@ -53,11 +53,11 @@ apisix:
 plugins:
   # Unifra plugins (by priority, highest first)
   - unifra-jsonrpc-var      # 26000 - Parse JSON-RPC
-  - unifra-ctx-var          # 24000 - Consumer variables
+  - unifra-ctx-var          # 2400 - Consumer variables
   - unifra-whitelist        # 1900  - Access control
   - unifra-calculate-cu     # 1012  - CU calculation
-  - unifra-limit-monthly-cu # 1011  - Monthly quota
-  - unifra-limit-cu         # 1010  - Rate limiting
+  - unifra-limit-cu         # 1011  - Rate limiting
+  - unifra-limit-monthly-cu # 1010  - Monthly quota
   - unifra-ws-jsonrpc-proxy # 999   - WebSocket proxy
   # ... APISIX built-in plugins
   - proxy-rewrite
@@ -109,11 +109,11 @@ curl -X POST https://eth-mainnet.unifra.io/v1/your-api-key \
 | Plugin | Priority | Description |
 |--------|----------|-------------|
 | `unifra-jsonrpc-var` | 26000 | Parse JSON-RPC, inject `ctx.var.jsonrpc_method`, etc. |
-| `unifra-ctx-var` | 24000 | Inject consumer quotas into ctx.var |
+| `unifra-ctx-var` | 2400 | Inject consumer quotas into ctx.var |
 | `unifra-whitelist` | 1900 | Check method access (free vs paid tier) |
 | `unifra-calculate-cu` | 1012 | Calculate CU cost for request |
-| `unifra-limit-monthly-cu` | 1011 | Enforce monthly quota |
-| `unifra-limit-cu` | 1010 | Per-second rate limiting |
+| `unifra-limit-cu` | 1011 | Per-second rate limiting |
+| `unifra-limit-monthly-cu` | 1010 | Enforce monthly quota |
 | `unifra-ws-jsonrpc-proxy` | 999 | WebSocket proxy with per-message limits |
 
 ## Zero Intrusion Architecture

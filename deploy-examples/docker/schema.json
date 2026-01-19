@@ -53,7 +53,7 @@
             }
         },
         "unifra-limit-monthly-cu": {
-            "priority": 1011,
+            "priority": 1010,
             "version": 0.1,
             "schema": {
                 "properties": {
@@ -130,7 +130,7 @@
             }
         },
         "unifra-limit-cu": {
-            "priority": 1010,
+            "priority": 1011,
             "version": 0.1,
             "schema": {
                 "properties": {
@@ -775,7 +775,7 @@
             }
         },
         "unifra-ctx-var": {
-            "priority": 24000,
+            "priority": 2400,
             "version": 0.1,
             "schema": {
                 "description": "Key-value pairs for variables to inject into ctx.var",
