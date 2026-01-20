@@ -80,7 +80,7 @@ function _M.access(conf, ctx)
     -- Load whitelist configuration using unified config module
     -- Pass TTL directly (not via set_ttl) to avoid cross-route interference
     local config_cache, err = whitelist.load_config(ctx, conf.config_path, conf.config_ttl)
-    if not config_cache then
+    if err or not config_cache then
         core.log.error("failed to load whitelist config: ", err, ", denying request")
         core.response.set_header("Content-Type", "application/json")
         return 500, jsonrpc.error_response(

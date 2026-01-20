@@ -59,8 +59,7 @@ function _M.access(conf, ctx)
         -- Skip meta keys
         if key ~= "_meta" and key ~= "disable" then
             ctx.var[key] = value
-            ctx[key] = value -- Also store in Lua context for safety
-            core.log.info("unifra-ctx-var: set ", key, " = ", value)
+            core.log.debug("unifra-ctx-var: set ", key, " = ", value)
         end
     end
 end

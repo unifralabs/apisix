@@ -14,6 +14,7 @@
 
 local core = require("apisix.core")
 local balancer = require("apisix.balancer")
+local plugin_mod = require("apisix.plugin")
 local upstream_mod = require("apisix.upstream")
 local jsonrpc = require("unifra.jsonrpc.core")
 local whitelist_mod = require("unifra.jsonrpc.whitelist")
@@ -69,29 +70,10 @@ local schema = {
             type = "string",
             description = "Override network name instead of extracting from host"
         },
-        -- Kafka configuration overrides (optional)
-        kafka_brokers = {
-            type = "array",
-            items = {
-                type = "object",
-                properties = {
-                    host = { type = "string" },
-                    port = { type = "integer" },
-                },
-                required = { "host", "port" }
-            }
-        },
         kafka_topic = {
-            type = "string"
+            type = "string",
+            default = "unifra-ws-logs"
         },
-        kafka_producer_config = {
-            type = "object",
-            properties = {
-                producer_type = { type = "string", enum = {"async", "sync"} },
-                refresh_interval = { type = "integer" },
-                required_acks = { type = "integer" },
-            }
-        }
     },
 }
 
@@ -143,10 +125,6 @@ local metadata_schema = {
                 { host = "kafka", port = 9092 }
             }
         },
-        kafka_topic = {
-            type = "string",
-            default = "unifra-ws-logs"
-        },
         kafka_producer_config = {
             type = "object",
             properties = {
@@ -197,13 +175,12 @@ end
 --- Run checks on a JSON-RPC message
 -- @return number status code (200 = ok, other = error)
 -- @return string|nil error response JSON
-local function check_message(conf, ctx, data)
-    local cjson = require("cjson.safe")
-
+-- @return table|nil parsed JSON-RPC result
+local function check_message(conf, ctx, data, meta_conf)
     -- Parse JSON-RPC
     local result, err = jsonrpc.parse(data)
     if err then
-        return 400, jsonrpc.error_response(jsonrpc.ERROR_PARSE, err, nil)
+        return 400, jsonrpc.error_response(jsonrpc.ERROR_PARSE, err, nil), nil
     end
 
     local network = conf.network or jsonrpc.extract_network(ctx.var.host)
@@ -211,44 +188,34 @@ local function check_message(conf, ctx, data)
 
     -- Bypass check
     if should_bypass(network, conf.bypass_networks) then
-        return 200, nil
+        return 200, nil, result
     end
 
     -- Load configs using unified config module (supports hot reload)
     -- Uses per-route caching with TTL-based refresh
     
-    -- Load Metadata
-    local plugin_mod = require("apisix.plugin")
-    local metadata = plugin_mod.plugin_metadata(plugin_name)
-    local meta_conf = metadata and metadata.value or {}
+    meta_conf = meta_conf or {}
+
+    -- Configuration Source: Plugin Metadata (with defaults)
+    local whitelist_path = meta_conf.whitelist_config_path
+    local cu_path = meta_conf.cu_config_path
     
-    -- Ensure defaults are populated from metadata_schema even if meta_conf is empty
-    -- core.schema.check will populate default values into meta_conf
-    local valid, err = core.schema.check(metadata_schema, meta_conf)
-    if not valid then
-        core.log.error("ws: failed to validate metadata: ", err)
-    end
-    
-    -- Configuration Hierarchy: Route Config > Plugin Metadata (with defaults)
-    local whitelist_path = conf.whitelist_config_path or meta_conf.whitelist_config_path
-    local cu_path = conf.cu_config_path or meta_conf.cu_config_path
-    
-    local redis_host = conf.redis_host or meta_conf.redis_host
-    local redis_port = conf.redis_port or meta_conf.redis_port
-    local redis_password = conf.redis_password or meta_conf.redis_password
-    local redis_database = conf.redis_database or meta_conf.redis_database
-    local redis_timeout = conf.redis_timeout or meta_conf.redis_timeout
+    local redis_host = meta_conf.redis_host
+    local redis_port = meta_conf.redis_port
+    local redis_password = meta_conf.redis_password
+    local redis_database = meta_conf.redis_database
+    local redis_timeout = meta_conf.redis_timeout
 
     local whitelist_config, wl_load_err = whitelist_mod.load_config(ctx, whitelist_path)
     if not whitelist_config then
         core.log.error("ws: failed to load whitelist: ", wl_load_err)
-        return 500, jsonrpc.error_response(jsonrpc.ERROR_INTERNAL, "config load failed", nil)
+        return 500, jsonrpc.error_response(jsonrpc.ERROR_INTERNAL, "config load failed", nil), result
     end
 
     local cu_config, cu_load_err = config_mod.load_cu_pricing(ctx, cu_path)
     if not cu_config then
         core.log.error("ws: failed to load CU pricing: ", cu_load_err)
-        return 500, jsonrpc.error_response(jsonrpc.ERROR_INTERNAL, "config load failed", nil)
+        return 500, jsonrpc.error_response(jsonrpc.ERROR_INTERNAL, "config load failed", nil), result
     end
 
     -- Whitelist check
@@ -261,61 +228,21 @@ local function check_message(conf, ctx, data)
         if wl_err:find("requires paid") then
             code = jsonrpc.ERROR_FORBIDDEN
         end
-        return 405, jsonrpc.error_response(code, wl_err, result.ids and result.ids[1])
+        return 405, jsonrpc.error_response(code, wl_err, result.ids and result.ids[1]), result
     end
 
     -- Calculate CU
     local total_cu = cu_mod.calculate(methods, cu_config)
 
-    -- Monthly quota check (atomic via billing module)
-    local quota = tonumber(ctx.var.monthly_quota)
-    if quota and quota > 0 then
-        -- Use shared quota key (user_id) if available, fallback to consumer_name (api_key)
-        -- This ensures consistency with HTTP monthly limit plugin
-        local quota_key = ctx.var.quota_key
-        if not quota_key or quota_key == "" then
-            quota_key = ctx.var.consumer_name
-        end
-
-        if quota_key then
-            local redis_conf = {
-                host = redis_host,
-                port = redis_port,
-                password = redis_password,
-                database = redis_database,
-                timeout = redis_timeout,
-            }
-
-            local allowed, used, remaining, quota_err = billing.check_and_increment(
-                redis_conf, ctx, quota_key, total_cu, quota
-            )
-
-            if quota_err then
-                core.log.error("ws monthly quota check error: ", quota_err)
-                return 500, jsonrpc.error_response(
-                    jsonrpc.ERROR_INTERNAL,
-                    "monthly quota service unavailable",
-                    result.ids and result.ids[1]
-                )
-            end
-
-            if not allowed then
-                core.log.warn("ws monthly quota exceeded: key=", quota_key,
-                              ", used=", used, ", quota=", quota)
-                return 429, jsonrpc.error_response(
-                    jsonrpc.ERROR_QUOTA_EXCEEDED,
-                    "monthly quota exceeded",
-                    result.ids and result.ids[1]
-                )
-            end
-        end
-    end
-
     -- Rate limit check (per-second sliding window, same as HTTP path)
     if conf.enable_rate_limit then
         local limit = tonumber(ctx.var.seconds_quota)
         if limit and limit > 0 then
-            local key_value = ctx.var.consumer_name or ctx.var.remote_addr
+            -- Use shared quota key (user_id) if available, consistent with monthly quota
+            local key_value = ctx.var.quota_key
+            if not key_value or key_value == "" then
+                key_value = ctx.var.consumer_name or ctx.var.remote_addr
+            end
 
             local redis_conf = {
                 host = redis_host,
@@ -360,7 +287,11 @@ local function check_message(conf, ctx, data)
                     end
 
                     if redis_conf.database and redis_conf.database > 0 then
-                        red:select(redis_conf.database)
+                        local ok, select_err = red:select(redis_conf.database)
+                        if not ok then
+                            metrics.record_redis_op("select", false)
+                            return nil, "redis select failed: " .. (select_err or "unknown")
+                        end
                     end
 
                     -- Execute sliding window script
@@ -397,7 +328,7 @@ local function check_message(conf, ctx, data)
                         jsonrpc.ERROR_INTERNAL,
                         "rate limiting service unavailable",
                         result.ids and result.ids[1]
-                    )
+                    ), result
                 end
             else
                 -- Parse result: {allowed (1/0), current_cu, remaining}
@@ -408,33 +339,71 @@ local function check_message(conf, ctx, data)
                         jsonrpc.ERROR_RATE_LIMITED,
                         "rate limit exceeded",
                         result.ids and result.ids[1]
-                    )
+                    ), result
                 end
             end
         end
     end
 
-    return 200, nil
+    -- Monthly quota check (atomic via billing module)
+    local quota = tonumber(ctx.var.monthly_quota)
+    if quota and quota > 0 then
+        -- Use shared quota key (user_id) if available, fallback to consumer_name (api_key)
+        -- This ensures consistency with HTTP monthly limit plugin
+        local quota_key = ctx.var.quota_key
+        if not quota_key or quota_key == "" then
+            quota_key = ctx.var.consumer_name
+        end
+
+        if quota_key then
+            local redis_conf = {
+                host = redis_host,
+                port = redis_port,
+                password = redis_password,
+                database = redis_database,
+                timeout = redis_timeout,
+            }
+
+            local allowed, used, remaining, quota_err = billing.check_and_increment(
+                redis_conf, ctx, quota_key, total_cu, quota
+            )
+
+            if quota_err then
+                core.log.error("ws monthly quota check error: ", quota_err)
+                return 500, jsonrpc.error_response(
+                    jsonrpc.ERROR_INTERNAL,
+                    "monthly quota service unavailable",
+                    result.ids and result.ids[1]
+                ), result
+            end
+
+            if not allowed then
+                core.log.warn("ws monthly quota exceeded: key=", quota_key,
+                              ", used=", used, ", quota=", quota)
+                return 429, jsonrpc.error_response(
+                    jsonrpc.ERROR_QUOTA_EXCEEDED,
+                    "monthly quota exceeded",
+                    result.ids and result.ids[1]
+                ), result
+            end
+        end
+    end
+
+    return 200, nil, result
 end
 
 
 -- Batch processor for Kafka logging
 local buffers = {}
 
-local function get_batch_processor(metadata, route_conf)
-    local meta_conf = metadata and metadata.value or {}
-    
-    -- Ensure defaults
-    local valid, err = core.schema.check(metadata_schema, meta_conf)
-    if not valid then
-        core.log.error("ws: failed to check metadata for kafka: ", err)
+local function get_batch_processor(meta_conf, conf)
+    if not meta_conf then
         return nil
     end
-
-    -- Priority: Route Config > Metadata Config
-    local brokers = route_conf and route_conf.kafka_brokers or meta_conf.kafka_brokers
-    local topic = route_conf and route_conf.kafka_topic or meta_conf.kafka_topic
-    local prod_conf = route_conf and route_conf.kafka_producer_config or meta_conf.kafka_producer_config
+    -- Configuration Source: Plugin Metadata (with defaults)
+    local brokers = meta_conf.kafka_brokers
+    local prod_conf = meta_conf.kafka_producer_config
+    local topic = conf and conf.kafka_topic or "unifra-ws-logs"
 
     -- Cache key must include broker hash to prevent collision if different routes
     -- use different brokers/producer configs for the same topic (edge case)
@@ -466,19 +435,15 @@ local function get_batch_processor(metadata, route_conf)
             table.insert(broker_list, { host = b.host, port = b.port })
         end
 
-        core.log.warn("ws: flushing " .. #entries .. " logs to kafka topic: " .. topic)
+        core.log.debug("ws: flushing ", #entries, " logs to kafka topic: ", topic)
 
         local p = producer:new(broker_list, prod_conf)
         
         for _, entry in ipairs(entries) do
             local json_str = core.json.encode(entry)
-            core.log.info("ws: sending log to kafka: ", json_str)
-            
             local ok, err = p:send(topic, nil, json_str)
             if not ok then
                 core.log.error("ws: failed to send log to kafka: ", err)
-            else
-                core.log.info("ws: successfully sent log to kafka")
             end
         end
         return true
@@ -495,12 +460,7 @@ local function get_batch_processor(metadata, route_conf)
 end
 
 
-local function log_jsonrpc(ctx, conf, base_info, log_details)
-    -- Load metadata to get Kafka config
-    local plugin_mod = require("apisix.plugin")
-    local metadata = plugin_mod.plugin_metadata(plugin_name)
-    
-    local bp = get_batch_processor(metadata, conf)
+local function log_jsonrpc(ctx, conf, base_info, log_details, bp)
     if not bp then
         return
     end
@@ -535,7 +495,7 @@ local function log_jsonrpc(ctx, conf, base_info, log_details)
         request_id = extra_info.request_id,
     }
 
-    core.log.info("ws: queuing jsonrpc log: ", core.json.encode(log_entry), " user_id=", user_id)
+    core.log.debug("ws: queuing jsonrpc log, user_id=", user_id)
     bp:push(log_entry)
 end
 
@@ -561,6 +521,15 @@ function _M.access(conf, ctx)
         app_id = ctx.app_id or ctx.var.app_id or ctx.consumer_name or ctx.var.consumer_name,
         network = network
     }
+
+    -- Load plugin metadata once per connection (defaults are populated in-place)
+    local metadata = plugin_mod.plugin_metadata(plugin_name)
+    local meta_conf = metadata and metadata.value or {}
+    local valid, err = core.schema.check(metadata_schema, meta_conf)
+    if not valid then
+        core.log.error("ws: failed to validate metadata: ", err)
+    end
+    local bp = get_batch_processor(meta_conf, conf)
 
     -- Initialize upstream
     local route = ctx.matched_route
@@ -673,8 +642,48 @@ function _M.access(conf, ctx)
 
     -- Shared state for correlating requests and responses
     local inflight_requests = {}
+    local expired_request_ids = {}
     local request_counter = 0
     local cjson = require("cjson.safe")
+    local inflight_ttl = math.max(1, (ws_timeout or 60000) / 1000)
+    local cleanup_interval = math.max(1, inflight_ttl / 2)
+    local last_cleanup = ngx.now()
+
+    local function cleanup_inflight(now, wb)
+        if (now - last_cleanup) < cleanup_interval then
+            return
+        end
+        last_cleanup = now
+
+        local expired_requests = {}
+        for internal_id, req_ctx in pairs(inflight_requests) do
+            if now - req_ctx.start_time > inflight_ttl then
+                inflight_requests[internal_id] = nil
+                expired_request_ids[internal_id] = now
+                expired_requests[#expired_requests + 1] = req_ctx
+            end
+        end
+
+        if wb then
+            for _, req_ctx in ipairs(expired_requests) do
+                local timeout_resp = jsonrpc.error_response(
+                    jsonrpc.ERROR_INTERNAL,
+                    "request timeout",
+                    req_ctx.orig_id
+                )
+                local _, send_err = wb:send_text(timeout_resp)
+                if send_err then
+                    core.log.warn("ws-jsonrpc-proxy: failed to send timeout response: ", send_err)
+                end
+            end
+        end
+
+        for internal_id, ts in pairs(expired_request_ids) do
+            if now - ts > inflight_ttl then
+                expired_request_ids[internal_id] = nil
+            end
+        end
+    end
 
     -- Spawn downstream thread (upstream -> client)
     local downstream_thread = ngx.thread.spawn(function()
@@ -714,10 +723,14 @@ function _M.access(conf, ctx)
                             duration = duration,
                             status = 200,
                             extra_info = req_ctx.extra_info
-                        })
+                        }, bp)
                         
                         -- Cleanup
                         inflight_requests[internal_id_key] = nil
+                    elseif expired_request_ids[internal_id_key] then
+                        expired_request_ids[internal_id_key] = nil
+                        core.log.warn("ws-jsonrpc-proxy: dropping late response for expired request id: ", internal_id_key)
+                        goto continue
                     else
                         -- Unmatched response (timeout? or unsolicited? or batch?)
                         -- If we didn't rewrite it (not found), pass through as is.
@@ -727,7 +740,7 @@ function _M.access(conf, ctx)
                             duration = 0,
                             status = 200,
                             extra_info = { network = conf.network } 
-                        })
+                        }, bp)
                     end
                 elseif json_resp then
                      -- Notification from upstream?
@@ -737,7 +750,7 @@ function _M.access(conf, ctx)
                         duration = 0,
                         status = 200,
                         extra_info = { network = conf.network }
-                    })
+                    }, bp)
                 end
             end
 
@@ -768,6 +781,7 @@ function _M.access(conf, ctx)
     -- Main thread: client -> upstream
     while true do
         local data, typ, err = wb:recv_frame()
+        cleanup_inflight(ngx.now(), wb)
 
         if not data then
             if err ~= "timeout" then
@@ -787,23 +801,20 @@ function _M.access(conf, ctx)
             wc:send_pong()
         elseif typ == "text" then
             -- Check JSON-RPC message
-            local status, error_resp = check_message(conf, ctx, data)
+            local status, error_resp, parsed = check_message(conf, ctx, data, meta_conf)
             local network = conf.network or jsonrpc.extract_network(ctx.var.host)
 
             if status ~= 200 then
                 -- Log rejected request immediately
-                local json_data = cjson.decode(data)
                 local method_name = nil
                 local req_id = nil
-                
-                if json_data then
-                    if type(json_data) == "table" then
-                        if #json_data > 0 then
-                             method_name = "BATCH"
-                        else
-                             method_name = json_data.method
-                             req_id = json_data.id
-                        end
+
+                if parsed then
+                    if parsed.is_batch then
+                        method_name = "BATCH"
+                    elseif parsed.raw then
+                        method_name = parsed.raw.method
+                        req_id = parsed.raw.id
                     end
                 end
 
@@ -818,7 +829,7 @@ function _M.access(conf, ctx)
                         request_id = req_id,
                         error = error_resp
                     }
-                })
+                }, bp)
 
                 wb:send_text(error_resp)
                 goto continue_loop
@@ -830,19 +841,19 @@ function _M.access(conf, ctx)
             -- 3. Store Mapping
             -- 4. Re-encode and Forward
             
-            local json_ops = cjson.decode(data)
+            local json_ops = parsed and parsed.raw or nil
             local method_name = "unknown"
             local req_id = nil
             local is_batch = false
             
-            if json_ops then
-                 if json_ops.method then
-                    method_name = json_ops.method
-                    req_id = json_ops.id
-                 elseif #json_ops > 0 then
+            if parsed then
+                if parsed.is_batch then
                     method_name = "BATCH"
                     is_batch = true
-                 end
+                elseif json_ops and json_ops.method then
+                    method_name = json_ops.method
+                    req_id = json_ops.id
+                end
             end
             
             -- Prepare data to send (default to original)
@@ -884,7 +895,7 @@ function _M.access(conf, ctx)
                         method = method_name,
                         request_id = req_id,
                     }
-                })
+                }, bp)
             end
 
             -- Forward (rewritten or original) to upstream

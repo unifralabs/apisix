@@ -4,11 +4,11 @@
 -- Enforces monthly CU quota limits.
 -- Checks if the user has exceeded their monthly allocation.
 --
--- Priority: 1010 (runs after CU calculation, before per-second limit)
+-- Priority: 1010 (runs after CU calculation, after per-second limit)
 --
 
 local core = require("apisix.core")
-local jsonrpc = require("unifra.jsonrpc.core")
+local plugin_mod = require("apisix.plugin")
 local billing = require("unifra.jsonrpc.billing")
 local errors = require("unifra.jsonrpc.errors")
 
@@ -34,10 +34,6 @@ local schema = {
         redis_database = { type = "integer" },
         redis_timeout = { type = "integer" },
         
-        rejected_code = {
-            type = "integer",
-            default = 429,
-        },
         rejected_msg = {
             type = "string",
             default = "monthly quota exceeded",
@@ -114,7 +110,6 @@ function _M.access(conf, ctx)
     local cu = tonumber(ctx.var.cu) or 1
 
     -- Load Metadata
-    local plugin_mod = require("apisix.plugin")
     local metadata = plugin_mod.plugin_metadata(plugin_name)
     local meta_conf = metadata and metadata.value or {}
     
