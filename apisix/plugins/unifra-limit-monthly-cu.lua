@@ -17,16 +17,6 @@ local plugin_name = "unifra-limit-monthly-cu"
 local schema = {
     type = "object",
     properties = {
-        quota_var = {
-            type = "string",
-            default = "monthly_quota",
-            description = "Variable name containing monthly quota"
-        },
-        quota_key_var = {
-            type = "string",
-            default = "quota_key",
-            description = "Variable name for quota key (user_id for shared quotas). Falls back to consumer_name if not set."
-        },
         -- Redis configuration (Optional override)
         redis_host = { type = "string" },
         redis_port = { type = "integer" },
@@ -82,8 +72,8 @@ end
 
 
 function _M.access(conf, ctx)
-    -- Get monthly quota from consumer configuration
-    local quota = tonumber(ctx.var[conf.quota_var])
+    -- Get monthly quota from consumer configuration (injected by unifra-ctx-var)
+    local quota = tonumber(ctx.var.monthly_quota)
     if not quota or quota <= 0 then
         core.log.debug("No monthly quota configured, skipping check")
         return
@@ -98,7 +88,7 @@ function _M.access(conf, ctx)
 
     -- Get quota_key: use configured variable, fallback to consumer_name
     -- This allows multiple API keys (consumers) to share a single user's quota
-    local quota_key = ctx.var[conf.quota_key_var]
+    local quota_key = ctx.var.quota_key
     if not quota_key or quota_key == "" then
         quota_key = consumer_name
         core.log.debug("quota_key not set, using consumer_name: ", consumer_name)

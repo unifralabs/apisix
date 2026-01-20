@@ -20,21 +20,12 @@ local schema = {
     type = "object",
     properties = {
         -- Rate limit configuration
-        limit_var = {
-            type = "string",
-            default = "seconds_quota",
-            description = "Variable name containing the CU limit"
-        },
+
         time_window = {
             type = "integer",
             default = 1,
             minimum = 1,
             description = "Time window in seconds"
-        },
-        key_var = {
-            type = "string",
-            default = "consumer_name",
-            description = "Variable name for rate limit key"
         },
 
         -- Redis configuration (Optional override)
@@ -109,14 +100,19 @@ function _M.access(conf, ctx)
     local cu = tonumber(ctx.var.cu) or 1
 
     -- Get rate limit from variable (set by key-auth or other plugins)
-    local limit = tonumber(ctx.var[conf.limit_var])
+    local limit = tonumber(ctx.var.seconds_quota)
     if not limit or limit <= 0 then
         -- No limit configured, skip rate limiting
         return
     end
 
-    -- Get key for rate limiting
-    local key_value = ctx.var[conf.key_var]
+    -- Get key for rate limiting (Priority: quota_key > consumer_name > remote_addr)
+    -- This allows rate limits (seconds_quota) to be shared across multiple API keys if quota_key is set
+    local key_value = ctx.var.quota_key
+    if not key_value or key_value == "" then
+        key_value = ctx.var.consumer_name
+    end
+
     if not key_value or key_value == "" then
         -- Fallback to remote address
         key_value = ctx.var.remote_addr
