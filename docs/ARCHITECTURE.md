@@ -537,8 +537,14 @@ The plugin spawns a lightweight thread (Lua coroutine) to handle full-duplex com
     *   Parses JSON-RPC responses.
     *   **Correlates** responses with requests using the JSON-RPC ID.
     *   Calculates latency (`now - start_time`).
-    *   Logs detailed metrics (latency, CU cost, status) to Kafka.
+    *   Logs Kafka events according to the policy below.
     *   Forwards responses back to the Client.
+
+### Kafka Logging Policy
+
+- Non-subscription JSON-RPC request/response pairs are emitted to Kafka in the same schema as the Kafka Logger configuration (full payload).
+- Subscription lifecycle and push traffic (eth_subscribe request, subscription success response, eth_subscription events) emits metadata only: method, network, latency, status, CU, user identifier. No request/response payloads.
+- Subscription push events are routed to a dedicated Kafka topic via `kafka_event_topic` (default: `unifra-ws-events`).
 
 ### ID Correlation & Context Capture
 
@@ -621,5 +627,4 @@ For **EACH** WebSocket message frame:
 │      Forward to Upstream       │
 └────────────────────────────────┘
 ```
-
 

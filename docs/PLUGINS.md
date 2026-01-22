@@ -702,6 +702,12 @@ For each message from client:
 4. If blocked, send error response back to client
 5. If allowed, forward to upstream
 
+### Kafka Logging Policy
+
+- Non-subscription JSON-RPC queries (for example, eth_getBlockByNumber, eth_getTransactionByHash) are logged to Kafka with full request/response payloads, matching the Kafka Logger output schema (same log_format).
+- Subscription workflows (eth_subscribe requests, subscription success responses, and eth_subscription push events) do not log request/response payloads. Only metadata is emitted: method, network, latency, status, CU, and user identifier.
+- Subscription push events are emitted to a separate Kafka topic via `kafka_event_topic` (default: `unifra-ws-events`).
+
 ### Error Message (WebSocket)
 
 When rate limited, sends JSON-RPC error through WebSocket:

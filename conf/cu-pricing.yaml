@@ -9,6 +9,21 @@
 # Default CU cost for unlisted methods
 default: 1
 
+# ================================
+# WebSocket Push Notification CU Costs
+# ================================
+# These define the CU cost for each push notification type
+# when subscription data is pushed from upstream to client.
+push_notification:
+  # Default cost if subscription type is unknown
+  default: 10
+  # Cost per newHeads event (new block header)
+  newHeads: 10        # TODO: Adjust value
+  # Cost per logs event (contract log)
+  logs: 20            # TODO: Adjust value
+  # Cost per newPendingTransactions event (mempool tx)
+  newPendingTransactions: 50   # TODO: Adjust value
+
 # Method-specific CU costs
 methods:
   # ================================

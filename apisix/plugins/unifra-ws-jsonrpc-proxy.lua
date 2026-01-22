@@ -21,7 +21,6 @@ local whitelist_mod = require("unifra.jsonrpc.whitelist")
 local cu_mod = require("unifra.jsonrpc.cu")
 local redis_scripts = require("unifra.jsonrpc.redis_scripts")
 local redis_circuit_breaker = require("unifra.jsonrpc.redis_circuit_breaker")
-local config_mod = require("unifra.jsonrpc.config")
 local billing = require("unifra.jsonrpc.billing")
 local errors = require("unifra.jsonrpc.errors")
 local metrics = require("unifra.metrics")
@@ -72,7 +71,12 @@ local schema = {
         },
         kafka_topic = {
             type = "string",
-            default = "unifra-ws-logs"
+            default = "request_metrics_prod" -- request_metrics_staging
+        },
+        kafka_event_topic = {
+            type = "string",
+            default = "request_metrics_event_prod", -- request_metrics_event_staging
+            description = "Kafka topic for subscription push event logs"
         },
     },
 }
@@ -176,11 +180,12 @@ end
 -- @return number status code (200 = ok, other = error)
 -- @return string|nil error response JSON
 -- @return table|nil parsed JSON-RPC result
+-- @return number|nil total CU cost (if calculated)
 local function check_message(conf, ctx, data, meta_conf)
     -- Parse JSON-RPC
     local result, err = jsonrpc.parse(data)
     if err then
-        return 400, jsonrpc.error_response(jsonrpc.ERROR_PARSE, err, nil), nil
+        return 400, jsonrpc.error_response(jsonrpc.ERROR_PARSE, err, nil), nil, nil
     end
 
     local network = conf.network or jsonrpc.extract_network(ctx.var.host)
@@ -188,7 +193,7 @@ local function check_message(conf, ctx, data, meta_conf)
 
     -- Bypass check
     if should_bypass(network, conf.bypass_networks) then
-        return 200, nil, result
+        return 200, nil, result, nil
     end
 
     -- Load configs using unified config module (supports hot reload)
@@ -209,14 +214,21 @@ local function check_message(conf, ctx, data, meta_conf)
     local whitelist_config, wl_load_err = whitelist_mod.load_config(ctx, whitelist_path)
     if not whitelist_config then
         core.log.error("ws: failed to load whitelist: ", wl_load_err)
-        return 500, jsonrpc.error_response(jsonrpc.ERROR_INTERNAL, "config load failed", nil), result
+        return 500, jsonrpc.error_response(jsonrpc.ERROR_INTERNAL, "config load failed", nil), result, nil
     end
 
-    local cu_config, cu_load_err = config_mod.load_cu_pricing(ctx, cu_path)
-    if not cu_config then
+    local cu_config, cu_load_err = cu_mod.load_config(ctx, cu_path)
+    if cu_load_err then
         core.log.error("ws: failed to load CU pricing: ", cu_load_err)
-        return 500, jsonrpc.error_response(jsonrpc.ERROR_INTERNAL, "config load failed", nil), result
+        return 500, jsonrpc.error_response(jsonrpc.ERROR_INTERNAL, "config load failed", nil), result, nil
     end
+    if not cu_config then
+        core.log.error("ws: failed to load CU pricing: empty config")
+        return 500, jsonrpc.error_response(jsonrpc.ERROR_INTERNAL, "config load failed", nil), result, nil
+    end
+
+    -- Calculate CU early so logs can include it even on errors
+    local total_cu = cu_mod.calculate(methods, cu_config)
 
     -- Whitelist check
     local monthly_quota = tonumber(ctx.var.monthly_quota) or 0
@@ -228,11 +240,8 @@ local function check_message(conf, ctx, data, meta_conf)
         if wl_err:find("requires paid") then
             code = jsonrpc.ERROR_FORBIDDEN
         end
-        return 405, jsonrpc.error_response(code, wl_err, result.ids and result.ids[1]), result
+        return 405, jsonrpc.error_response(code, wl_err, result.ids and result.ids[1]), result, total_cu
     end
-
-    -- Calculate CU
-    local total_cu = cu_mod.calculate(methods, cu_config)
 
     -- Rate limit check (per-second sliding window, same as HTTP path)
     if conf.enable_rate_limit then
@@ -328,7 +337,7 @@ local function check_message(conf, ctx, data, meta_conf)
                         jsonrpc.ERROR_INTERNAL,
                         "rate limiting service unavailable",
                         result.ids and result.ids[1]
-                    ), result
+                    ), result, total_cu
                 end
             else
                 -- Parse result: {allowed (1/0), current_cu, remaining}
@@ -339,7 +348,7 @@ local function check_message(conf, ctx, data, meta_conf)
                         jsonrpc.ERROR_RATE_LIMITED,
                         "rate limit exceeded",
                         result.ids and result.ids[1]
-                    ), result
+                    ), result, total_cu
                 end
             end
         end
@@ -374,7 +383,7 @@ local function check_message(conf, ctx, data, meta_conf)
                     jsonrpc.ERROR_INTERNAL,
                     "monthly quota service unavailable",
                     result.ids and result.ids[1]
-                ), result
+                ), result, total_cu
             end
 
             if not allowed then
@@ -384,26 +393,46 @@ local function check_message(conf, ctx, data, meta_conf)
                     jsonrpc.ERROR_QUOTA_EXCEEDED,
                     "monthly quota exceeded",
                     result.ids and result.ids[1]
-                ), result
+                ), result, total_cu
             end
         end
     end
 
-    return 200, nil, result
+    return 200, nil, result, total_cu
 end
 
 
 -- Batch processor for Kafka logging
 local buffers = {}
 
-local function get_batch_processor(meta_conf, conf)
+local function is_subscription_method(method)
+    return method == "eth_subscribe" or method == "eth_unsubscribe"
+end
+
+local function is_subscription_request(parsed)
+    if not parsed or not parsed.methods then
+        return false
+    end
+    for _, method in ipairs(parsed.methods) do
+        if is_subscription_method(method) then
+            return true
+        end
+    end
+    return false
+end
+
+local function get_batch_processor(meta_conf, conf, topic_override)
     if not meta_conf then
         return nil
     end
     -- Configuration Source: Plugin Metadata (with defaults)
     local brokers = meta_conf.kafka_brokers
     local prod_conf = meta_conf.kafka_producer_config
-    local topic = conf and conf.kafka_topic or "unifra-ws-logs"
+    local topic = topic_override or (conf and conf.kafka_topic)
+    if not topic then
+        core.log.error("ws: kafka topic not configured")
+        return nil
+    end
 
     -- Cache key must include broker hash to prevent collision if different routes
     -- use different brokers/producer configs for the same topic (edge case)
@@ -470,22 +499,23 @@ local function log_jsonrpc(ctx, conf, base_info, log_details, bp)
     local duration = log_details.duration or 0
     local status = log_details.status or 200
     local extra_info = log_details.extra_info or {}
+    local metadata_only = log_details.metadata_only or false
     
     -- Use captured base info
     local user_id = base_info.user_id or ""
     local app_id = base_info.app_id or ""
     local network = base_info.network or (extra_info and extra_info.network) or ""
+    local method = extra_info.method
     
     local log_entry = {
         user_id = user_id,
         app_id = app_id,
         network = network,
         duration = duration,
-        request = request_data,
-        response = response_data,
         client_ip = ctx.var.remote_addr,
         response_status_code = status,
         time = ngx.now(),
+        jsonrpc_method = method,
         
         -- Extra fields for detailed debugging/metrics
         cu_cost = extra_info.cu_cost,
@@ -494,6 +524,11 @@ local function log_jsonrpc(ctx, conf, base_info, log_details, bp)
         route_id = ctx.var.route_id,
         request_id = extra_info.request_id,
     }
+
+    if not metadata_only then
+        log_entry.request = request_data
+        log_entry.response = response_data
+    end
 
     core.log.debug("ws: queuing jsonrpc log, user_id=", user_id)
     bp:push(log_entry)
@@ -530,6 +565,78 @@ function _M.access(conf, ctx)
         core.log.error("ws: failed to validate metadata: ", err)
     end
     local bp = get_batch_processor(meta_conf, conf)
+    local event_topic = conf.kafka_event_topic
+    local event_bp = get_batch_processor(meta_conf, conf, event_topic)
+
+    -- Redis configuration for billing/concurrency
+    local redis_host = meta_conf.redis_host
+    local redis_port = meta_conf.redis_port
+    local redis_password = meta_conf.redis_password
+    local redis_database = meta_conf.redis_database
+    local redis_timeout = meta_conf.redis_timeout
+
+    local redis_conf = {
+        host = redis_host,
+        port = redis_port,
+        password = redis_password,
+        database = redis_database,
+        timeout = redis_timeout,
+    }
+
+    -- Concurrency Control
+    local conn_limit = 0
+    -- Try to get limit from Consumer config
+    if ctx.consumer and ctx.consumer.concurrency_limit then
+        conn_limit = tonumber(ctx.consumer.concurrency_limit) or 0
+    elseif ctx.var.consumer_name then
+         -- Fallback or other logic if needed, but per user request "read from consumer"
+    end
+
+    local conn_key = nil
+    
+    if conn_limit > 0 then
+        -- Use user_id for key consistency with monthly quota
+        -- Prioritize quota_key as requested
+        local key_suffix = ctx.var.quota_key
+        if not key_suffix or key_suffix == "" then
+            -- Fallback to user_id or consumer_name
+             key_suffix = base_info.user_id or ctx.var.consumer_name or ctx.var.remote_addr
+        end
+        conn_key = "ws_connections:" .. key_suffix
+
+        -- Increment connection count
+        local redis = require("resty.redis")
+        local red = redis:new()
+        red:set_timeout(redis_conf.timeout or 1000)
+        
+        local ok, conn_err = red:connect(redis_conf.host, redis_conf.port or 6379)
+        if ok then
+            if redis_conf.password and redis_conf.password ~= "" then
+                red:auth(redis_conf.password)
+            end
+            if redis_conf.database and redis_conf.database > 0 then
+                red:select(redis_conf.database)
+            end
+            
+            local current, err = red:incr(conn_key)
+            if current then
+                 -- Set expiry for safety
+                 red:expire(conn_key, 86400) 
+                 
+                 if current > conn_limit then
+                     core.log.warn("ws: concurrency limit exceeded for ", conn_key, ": ", current, " > ", conn_limit)
+                     red:decr(conn_key) -- Rollback
+                     red:set_keepalive(10000, 100)
+                     return 429
+                 end
+            else
+                 core.log.error("ws: failed to incr concurrency: ", err)
+            end
+            red:set_keepalive(10000, 100)
+        else
+            core.log.error("ws: failed to connect to redis for concurrency check: ", conn_err)
+        end
+    end
 
     -- Initialize upstream
     local route = ctx.matched_route
@@ -635,6 +742,19 @@ function _M.access(conf, ctx)
     if not wb then
         core.log.error("ws-jsonrpc-proxy: failed to accept: ", wb_err)
         wc:send_close()
+        -- Concurrency cleanup handled in finally block if we structure it well,
+        -- but here simpler to just decr if we incremented.
+        if conn_key then
+            local redis = require("resty.redis")
+            local red = redis:new()
+            red:set_timeout(redis_conf.timeout or 1000)
+            if red:connect(redis_conf.host, redis_conf.port or 6379) then
+                if redis_conf.password and redis_conf.password ~= "" then red:auth(redis_conf.password) end
+                if redis_conf.database and redis_conf.database > 0 then red:select(redis_conf.database) end
+                red:decr(conn_key)
+                red:set_keepalive(10000, 100)
+            end
+        end
         return 500
     end
 
@@ -648,6 +768,13 @@ function _M.access(conf, ctx)
     local inflight_ttl = math.max(1, (ws_timeout or 60000) / 1000)
     local cleanup_interval = math.max(1, inflight_ttl / 2)
     local last_cleanup = ngx.now()
+
+    -- Subscription ID Mapping for push notification billing
+    -- Maps subscription_id -> event_type (e.g., "0xsub_id" -> "newHeads")
+    local subscription_map = {}
+    -- Pending subscriptions: Maps internal_request_id -> event_type
+    -- Used to correlate eth_subscribe response with the subscription type
+    local pending_subscriptions = {}
 
     local function cleanup_inflight(now, wb)
         if (now - last_cleanup) < cleanup_interval then
@@ -707,6 +834,7 @@ function _M.access(conf, ctx)
                 if json_resp and json_resp.id then
                     local internal_id_key = tostring(json_resp.id)
                     req_ctx = inflight_requests[internal_id_key]
+                    local pending_sub_type = pending_subscriptions[internal_id_key]
                     
                     if req_ctx then
                         local end_time = ngx.now()
@@ -717,11 +845,21 @@ function _M.access(conf, ctx)
                         data = cjson.encode(json_resp) -- Re-encode with original ID
                         rewritten = true
                         
+                        -- Map subscription ID if this was an eth_subscribe response
+                        if pending_sub_type and json_resp.result then
+                            -- json_resp.result is the subscription_id (e.g., "0x12345...")
+                            local subscription_id = tostring(json_resp.result)
+                            subscription_map[subscription_id] = pending_sub_type
+                            core.log.debug("ws: mapped subscription_id=", subscription_id, " to type=", pending_sub_type)
+                            pending_subscriptions[internal_id_key] = nil -- Cleanup
+                        end
+                        
                         log_jsonrpc(ctx, conf, base_info, {
                             request_data = req_ctx.data,
                             response_data = data,
                             duration = duration,
                             status = 200,
+                            metadata_only = req_ctx.metadata_only,
                             extra_info = req_ctx.extra_info
                         }, bp)
                         
@@ -732,25 +870,111 @@ function _M.access(conf, ctx)
                         core.log.warn("ws-jsonrpc-proxy: dropping late response for expired request id: ", internal_id_key)
                         goto continue
                     else
+                        if pending_sub_type and json_resp.result then
+                            local subscription_id = tostring(json_resp.result)
+                            subscription_map[subscription_id] = pending_sub_type
+                            core.log.debug("ws: mapped subscription_id=", subscription_id, " to type=", pending_sub_type)
+                            pending_subscriptions[internal_id_key] = nil -- Cleanup
+                        end
+
                         -- Unmatched response (timeout? or unsolicited? or batch?)
                         -- If we didn't rewrite it (not found), pass through as is.
                         log_jsonrpc(ctx, conf, base_info, {
-                            request_data = "", 
+                            request_data = "",
                             response_data = data,
                             duration = 0,
                             status = 200,
-                            extra_info = { network = conf.network } 
+                            metadata_only = pending_sub_type ~= nil,
+                            extra_info = {
+                                network = conf.network,
+                                method = pending_sub_type and "eth_subscribe" or nil,
+                                cu_cost = 0,
+                            }
                         }, bp)
                     end
                 elseif json_resp then
-                     -- Notification from upstream?
+                     -- Notification from upstream
+                     local is_notification = (json_resp.id == nil and json_resp.method == "eth_subscription")
+                     local push_cost
+                     
+                     if is_notification then
+                         -- Push Notification Billing with event-specific costs
+                         -- Load CU config to get push costs
+                         local push_cost_config = nil
+                         local cu_config_loaded, cu_load_err = cu_mod.load_config(ctx, meta_conf.cu_config_path)
+                         if not cu_load_err and cu_config_loaded and cu_config_loaded.push_notification then
+                             push_cost_config = cu_config_loaded.push_notification
+                         end
+                         
+                         -- Determine subscription event type using subscription_map (Option B: Context Mapping)
+                         -- This avoids parsing the result structure every time
+                         local event_type = "default"
+                         if json_resp.params and json_resp.params.subscription then
+                             local subscription_id = tostring(json_resp.params.subscription)
+                             event_type = subscription_map[subscription_id] or "default"
+                             core.log.debug("ws: push notification for subscription_id=", subscription_id, ", type=", event_type)
+                         end
+                         
+                         -- Fallback: If event_type is still default, try to infer from result structure
+                         -- (This handles cases where subscription wasn't properly tracked)
+                         if event_type == "default" and json_resp.params and json_resp.params.result then
+                             local result = json_resp.params.result
+                             if type(result) == "table" then
+                                 if result.parentHash and result.number then
+                                     event_type = "newHeads"
+                                 elseif result.topics or result.logIndex then
+                                     event_type = "logs"
+                                 elseif result.hash and not result.parentHash then
+                                     event_type = "newPendingTransactions"
+                                 end
+                             elseif type(result) == "string" then
+                                 event_type = "newPendingTransactions" -- tx hash
+                             end
+                         end
+                         
+                         -- Get cost from config
+                         push_cost = 10 -- Default fallback
+                         if push_cost_config then
+                             if type(push_cost_config) == "table" then
+                                 push_cost = push_cost_config[event_type] or push_cost_config.default or 10
+                             else
+                                 push_cost = tonumber(push_cost_config) or 10
+                             end
+                         end
+
+                         local quota = tonumber(ctx.var.monthly_quota)
+
+                         if quota and quota > 0 then
+                             local quota_key = ctx.var.quota_key or ctx.var.consumer_name
+                             if quota_key then
+                                 -- Async billing: check and increment
+                                 local allowed, used, remaining, quota_err = billing.check_and_increment(
+                                     redis_conf, ctx, quota_key, push_cost, quota
+                                 )
+                                 
+                                 if not allowed and not quota_err then
+                                     core.log.warn("ws: push quota exceeded for ", quota_key, ", closing connection")
+                                     -- Send close frame
+                                     wb:send_close(1008, "Quota Exceeded")
+                                     break -- Exit loop to close connection
+                                 end
+                             end
+                         end
+                     end
+
                      log_jsonrpc(ctx, conf, base_info, {
                         request_data = "",
                         response_data = data,
                         duration = 0,
                         status = 200,
-                        extra_info = { network = conf.network }
-                    }, bp)
+                        metadata_only = is_notification,
+                        extra_info = {
+                            network = conf.network,
+                            method = is_notification and "eth_subscription" or nil,
+                            cu_cost = is_notification and push_cost or 0,
+                            is_notification = is_notification
+                        }
+                    }, is_notification and (event_bp or bp) or bp)
                 end
             end
 
@@ -801,8 +1025,9 @@ function _M.access(conf, ctx)
             wc:send_pong()
         elseif typ == "text" then
             -- Check JSON-RPC message
-            local status, error_resp, parsed = check_message(conf, ctx, data, meta_conf)
+            local status, error_resp, parsed, total_cu = check_message(conf, ctx, data, meta_conf)
             local network = conf.network or jsonrpc.extract_network(ctx.var.host)
+            local subscription_request = is_subscription_request(parsed)
 
             if status ~= 200 then
                 -- Log rejected request immediately
@@ -823,10 +1048,12 @@ function _M.access(conf, ctx)
                     response_data = error_resp,
                     duration = 0,
                     status = status,
+                    metadata_only = subscription_request,
                     extra_info = {
                         network = network,
                         method = method_name,
                         request_id = req_id,
+                        cu_cost = total_cu or 0,
                         error = error_resp
                     }
                 }, bp)
@@ -871,13 +1098,22 @@ function _M.access(conf, ctx)
                     start_time = ngx.now(),
                     orig_id = req_id,       -- Keep original ID to restore later
                     data = data,            -- Keep original Request Data for logging
+                    metadata_only = is_subscription_method(method_name),
                     extra_info = {
                         network = network,
                         method = method_name,
                         request_id = req_id,
-                        cu_cost = 0, 
+                        cu_cost = total_cu or 0,
                     }
                 }
+                
+                -- Track eth_subscribe requests for subscription ID mapping
+                -- When response comes back, we'll map subscription_id -> event_type
+                if method_name == "eth_subscribe" and json_ops.params and #json_ops.params > 0 then
+                    local sub_type = json_ops.params[1] -- e.g., "newHeads", "logs", "newPendingTransactions"
+                    pending_subscriptions[internal_id_str] = sub_type
+                    core.log.debug("ws: tracking eth_subscribe request, internal_id=", internal_id_str, ", type=", sub_type)
+                end
                 
                 -- Rewrite ID in JSON
                 json_ops.id = internal_id
@@ -887,13 +1123,15 @@ function _M.access(conf, ctx)
                 -- Log immediately as we don't track them with ID rewriting yet
                 log_jsonrpc(ctx, conf, base_info, {
                     request_data = data,
-                    response_data = "", 
+                    response_data = "",
                     duration = 0,
                     status = 200,
+                    metadata_only = subscription_request,
                     extra_info = {
                         network = network,
                         method = method_name,
                         request_id = req_id,
+                        cu_cost = total_cu or 0,
                     }
                 }, bp)
             end
@@ -919,6 +1157,22 @@ function _M.access(conf, ctx)
     core.log.info("ws-jsonrpc-proxy: cleaning up")
     ngx.thread.wait(downstream_thread)
     wc:send_close()
+
+    -- Concurrency Cleanup (DECR)
+    if conn_key then
+        local redis = require("resty.redis")
+        local red = redis:new()
+        red:set_timeout(redis_conf.timeout or 1000)
+        local ok, err = red:connect(redis_conf.host, redis_conf.port or 6379)
+        if ok then
+            if redis_conf.password and redis_conf.password ~= "" then red:auth(redis_conf.password) end
+            if redis_conf.database and redis_conf.database > 0 then red:select(redis_conf.database) end
+            red:decr(conn_key)
+            red:set_keepalive(10000, 100)
+        else
+             core.log.error("ws: failed to cleanup concurrency key: ", err)
+        end
+    end
 
     return 200
 end

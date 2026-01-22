@@ -15,16 +15,71 @@ local _M = {
 -- Default CU pricing configuration
 local DEFAULT_CONFIG = {
     default = 1,
+    push_notification = {
+        default = 10,
+        newHeads = 10,
+        logs = 20,
+        newPendingTransactions = 50
+    },
     methods = {}
 }
+
+local function value_or_default(value, default)
+    if value == nil then
+        return default
+    end
+    return value
+end
+
+local function clone_push_notification(config)
+    return {
+        default = config.default,
+        newHeads = config.newHeads,
+        logs = config.logs,
+        newPendingTransactions = config.newPendingTransactions
+    }
+end
+
+local function clone_default_config()
+    return {
+        default = DEFAULT_CONFIG.default,
+        push_notification = clone_push_notification(DEFAULT_CONFIG.push_notification),
+        methods = {}
+    }
+end
 
 
 --- Process raw CU pricing config into normalized structure
 -- @param parsed table Raw parsed config
 -- @return table Processed configuration
 local function process_cu_config(parsed)
+    -- Handle push_notification: can be a number (simple) or a table (event-specific)
+    local push_notif = parsed.push_notification
+    local push_notif_result
+    if type(push_notif) == "table" then
+        push_notif_result = {
+            default = value_or_default(push_notif.default, 10),
+            newHeads = value_or_default(push_notif.newHeads, 10),
+            logs = value_or_default(push_notif.logs, 20),
+            newPendingTransactions = value_or_default(push_notif.newPendingTransactions, 50)
+        }
+    elseif push_notif == nil then
+        -- Missing: use DEFAULT_CONFIG defaults (different per event type)
+        push_notif_result = clone_push_notification(DEFAULT_CONFIG.push_notification)
+    else
+        -- Legacy: single number applies to all events
+        local cost = tonumber(push_notif) or 10
+        push_notif_result = {
+            default = cost,
+            newHeads = cost,
+            logs = cost,
+            newPendingTransactions = cost
+        }
+    end
+
     return {
-        default = parsed.default or 1,
+        default = value_or_default(parsed.default, 1),
+        push_notification = push_notif_result,
         methods = parsed.methods or {}
     }
 end
@@ -45,7 +100,7 @@ function _M.load_config(ctx, path, ttl, force_reload)
 
     if not raw_config then
         ngx.log(ngx.WARN, "CU pricing config load failed: ", err or "unknown", ", using defaults")
-        return DEFAULT_CONFIG, err
+        return clone_default_config(), err
     end
 
     -- Process raw config into normalized structure
