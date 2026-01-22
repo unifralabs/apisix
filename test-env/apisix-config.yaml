@@ -14,9 +14,25 @@ apisix:
   
   # CRITICAL: Load Unifra plugins from external directory
   extra_lua_path: "/opt/unifra-apisix/?.lua"
+  proxy_cache:                      # Proxy Caching configuration
+    cache_ttl: 10s                  # The default caching time in disk if the upstream does not specify the cache time
+    zones:                          # The parameters of a cache
+      - name: disk_cache_one        # The name of the cache, administrator can specify
+                                    # which cache to use by name in the admin api (disk|memory)
+        memory_size: 50m            # The size of shared memory, it's used to store the cache index for
+                                    # disk strategy, store cache content for memory strategy (disk|memory)
+        disk_size: 1G               # The size of disk, it's used to store the cache data (disk)
+        disk_path: /tmp/disk_cache_one  # The path to store the cache data (disk)
+        cache_levels: "1:2"           # The hierarchy levels of a cache (disk)
+      #- name: disk_cache_two
+      #  memory_size: 50m
+      #  disk_size: 1G
+      #  disk_path: "/tmp/disk_cache_two"
+      #  cache_levels: "1:2"
+      - name: memory_cache
+        memory_size: 50m
 
 # Enable Unifra custom plugins
-plugins:
 plugins:      # plugin list (sorted by priority)
 #  - custom-ctx-var                 # priority: 2400
   #- env-to-ctx                # priority: 23001
