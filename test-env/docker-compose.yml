@@ -151,7 +151,7 @@ services:
     logging: *default-logging
 
   clickhouse:
-    image: clickhouse/clickhouse-server:latest
+    image: clickhouse/clickhouse-server:22.10.7.13-alpine
     restart: always
     environment:
       CLICKHOUSE_DB: metrics_staging

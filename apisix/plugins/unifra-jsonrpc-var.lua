@@ -128,6 +128,12 @@ function _M.rewrite(conf, ctx)
     ctx.var.jsonrpc_is_batch = result.is_batch
     ctx.var.jsonrpc_count = result.count
 
+    -- Expose Request ID for logging (kafka-logger, etc.)
+    -- Use the first ID for single/batch requests as a correlation identifier
+    if result.ids and #result.ids > 0 then
+        ctx.var.jsonrpc_id = result.ids[1]
+    end
+
     -- Also store full result in ctx for plugins that need more data
     ctx.jsonrpc = result
 
