@@ -826,6 +826,7 @@ function _M.access(conf, ctx)
 
             if typ == "text" then
                 -- Intercept response to rewrite ID and log
+                core.log.debug("ws: upstream response received, size=", #data)
                 local json_resp = cjson.decode(data)
                 local req_ctx = nil
                 local rewritten = false
@@ -850,10 +851,15 @@ function _M.access(conf, ctx)
                             -- json_resp.result is the subscription_id (e.g., "0x12345...")
                             local subscription_id = tostring(json_resp.result)
                             subscription_map[subscription_id] = pending_sub_type
-                            core.log.debug("ws: mapped subscription_id=", subscription_id, " to type=", pending_sub_type)
+                            core.log.info("ws: subscription created, user=", base_info.user_id, ", subscription_id=", subscription_id, ", type=", pending_sub_type)
                             pending_subscriptions[internal_id_key] = nil -- Cleanup
                         end
                         
+                        -- Log unsubscribe success
+                        if req_ctx.extra_info and req_ctx.extra_info.method == "eth_unsubscribe" then
+                            core.log.info("ws: unsubscribed, user=", base_info.user_id, ", result=", tostring(json_resp.result))
+                        end
+
                         log_jsonrpc(ctx, conf, base_info, {
                             request_data = req_ctx.data,
                             response_data = data,
@@ -873,7 +879,7 @@ function _M.access(conf, ctx)
                         if pending_sub_type and json_resp.result then
                             local subscription_id = tostring(json_resp.result)
                             subscription_map[subscription_id] = pending_sub_type
-                            core.log.debug("ws: mapped subscription_id=", subscription_id, " to type=", pending_sub_type)
+                            core.log.info("ws: subscription created, user=", base_info.user_id, ", subscription_id=", subscription_id, ", type=", pending_sub_type)
                             pending_subscriptions[internal_id_key] = nil -- Cleanup
                         end
 
@@ -895,6 +901,9 @@ function _M.access(conf, ctx)
                 elseif json_resp then
                      -- Notification from upstream
                      local is_notification = (json_resp.id == nil and json_resp.method == "eth_subscription")
+                     if is_notification then
+                         core.log.debug("ws: upstream push notification received, method=eth_subscription")
+                     end
                      local push_cost
                      
                      if is_notification then
@@ -1024,6 +1033,7 @@ function _M.access(conf, ctx)
         elseif typ == "pong" then
             wc:send_pong()
         elseif typ == "text" then
+            core.log.debug("ws: client request received, size=", #data)
             -- Check JSON-RPC message
             local status, error_resp, parsed, total_cu = check_message(conf, ctx, data, meta_conf)
             local network = conf.network or jsonrpc.extract_network(ctx.var.host)
@@ -1112,7 +1122,9 @@ function _M.access(conf, ctx)
                 if method_name == "eth_subscribe" and json_ops.params and #json_ops.params > 0 then
                     local sub_type = json_ops.params[1] -- e.g., "newHeads", "logs", "newPendingTransactions"
                     pending_subscriptions[internal_id_str] = sub_type
-                    core.log.debug("ws: tracking eth_subscribe request, internal_id=", internal_id_str, ", type=", sub_type)
+                    core.log.info("ws: eth_subscribe request, user=", base_info.user_id, ", type=", sub_type, ", internal_id=", internal_id_str)
+                elseif method_name == "eth_unsubscribe" and json_ops.params and #json_ops.params > 0 then
+                    core.log.info("ws: eth_unsubscribe request, user=", base_info.user_id, ", subscription_id=", json_ops.params[1])
                 end
                 
                 -- Rewrite ID in JSON
