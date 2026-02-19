@@ -1186,7 +1186,10 @@ function _M.access(conf, ctx)
         end
     end
 
-    return 200
+    -- Do not return a status code here: the HTTP 101 upgrade response
+    -- has already been sent, so setting ngx.status would trigger:
+    -- "attempt to set ngx.status after sending out response headers"
+    return
 end
 
 
