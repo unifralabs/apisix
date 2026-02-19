@@ -548,7 +548,8 @@ function _M.access(conf, ctx)
 
     -- Capture Context Variables Early
     -- This avoids thread scope issues and repeated lookups
-    local network = conf.network or jsonrpc.extract_network(ctx.var.host)
+    -- Prefer unifra_network set by unifra-jsonrpc-var plugin (single source of truth)
+    local network = ctx.var.unifra_network or conf.network or jsonrpc.extract_network(ctx.var.host)
 
 
 

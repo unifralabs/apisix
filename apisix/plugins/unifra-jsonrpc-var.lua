@@ -41,6 +41,14 @@ end
 
 
 function _M.rewrite(conf, ctx)
+    -- Extract network from config or host header FIRST
+    -- This must happen before any early returns so that ALL requests
+    -- (including WebSocket) have ctx.var.unifra_network set
+    local network = conf.network or jsonrpc.extract_network(ctx.var.host)
+    if network then
+        ctx.var.unifra_network = network
+    end
+
     -- Skip non-POST requests (GET for WebSocket handshake, etc.)
     if ctx.var.request_method ~= "POST" then
         return
@@ -136,12 +144,6 @@ function _M.rewrite(conf, ctx)
 
     -- Also store full result in ctx for plugins that need more data
     ctx.jsonrpc = result
-
-    -- Extract network from config or host header
-    local network = conf.network or jsonrpc.extract_network(ctx.var.host)
-    if network then
-        ctx.var.unifra_network = network
-    end
 
     core.log.info("jsonrpc parsed: method=", result.method,
                   ", count=", result.count,
