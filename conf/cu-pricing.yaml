@@ -16,13 +16,13 @@ default: 1
 # when subscription data is pushed from upstream to client.
 push_notification:
   # Default cost if subscription type is unknown
-  default: 10
-  # Cost per newHeads event (new block header)
-  newHeads: 10        # TODO: Adjust value
-  # Cost per logs event (contract log)
-  logs: 20            # TODO: Adjust value
-  # Cost per newPendingTransactions event (mempool tx)
-  newPendingTransactions: 50   # TODO: Adjust value
+  default: 5
+  # Cost per newHeads event (new block header, ~same as eth_getBlockByNumber)
+  newHeads: 5
+  # Cost per logs event (contract log, same as eth_getLogs)
+  logs: 10
+  # Cost per newPendingTransactions event (mempool tx, high frequency)
+  newPendingTransactions: 20
 
 # Method-specific CU costs
 methods:

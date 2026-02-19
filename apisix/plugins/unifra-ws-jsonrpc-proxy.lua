@@ -523,6 +523,7 @@ local function log_jsonrpc(ctx, conf, base_info, log_details, bp)
         service_id = ctx.var.service_id,
         route_id = ctx.var.route_id,
         request_id = extra_info.request_id,
+        subscription_type = extra_info.subscription_type,
     }
 
     if not metadata_only then
@@ -905,6 +906,7 @@ function _M.access(conf, ctx)
                          core.log.debug("ws: upstream push notification received, method=eth_subscription")
                      end
                      local push_cost
+                     local event_type
                      
                      if is_notification then
                          -- Push Notification Billing with event-specific costs
@@ -917,7 +919,7 @@ function _M.access(conf, ctx)
                          
                          -- Determine subscription event type using subscription_map (Option B: Context Mapping)
                          -- This avoids parsing the result structure every time
-                         local event_type = "default"
+                         event_type = "default"
                          if json_resp.params and json_resp.params.subscription then
                              local subscription_id = tostring(json_resp.params.subscription)
                              event_type = subscription_map[subscription_id] or "default"
@@ -981,7 +983,8 @@ function _M.access(conf, ctx)
                             network = conf.network,
                             method = is_notification and "eth_subscription" or nil,
                             cu_cost = is_notification and push_cost or 0,
-                            is_notification = is_notification
+                            is_notification = is_notification,
+                            subscription_type = is_notification and event_type or nil
                         }
                     }, is_notification and (event_bp or bp) or bp)
                 end
