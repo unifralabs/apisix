@@ -188,7 +188,7 @@ local function check_message(conf, ctx, data, meta_conf)
         return 400, jsonrpc.error_response(jsonrpc.ERROR_PARSE, err, nil), nil, nil
     end
 
-    local network = conf.network or jsonrpc.extract_network(ctx.var.host)
+    local network = ctx.var.unifra_network or conf.network or jsonrpc.extract_network(ctx.var.host)
     local methods = result.methods
 
     -- Bypass check
@@ -894,7 +894,7 @@ function _M.access(conf, ctx)
                             status = 200,
                             metadata_only = pending_sub_type ~= nil,
                             extra_info = {
-                                network = conf.network,
+                                network = network,
                                 method = pending_sub_type and "eth_subscribe" or nil,
                                 cu_cost = 0,
                             }
@@ -981,7 +981,7 @@ function _M.access(conf, ctx)
                         status = 200,
                         metadata_only = is_notification,
                         extra_info = {
-                            network = conf.network,
+                            network = network,
                             method = is_notification and "eth_subscription" or nil,
                             cu_cost = is_notification and push_cost or 0,
                             is_notification = is_notification,
@@ -1040,7 +1040,7 @@ function _M.access(conf, ctx)
             core.log.debug("ws: client request received, size=", #data)
             -- Check JSON-RPC message
             local status, error_resp, parsed, total_cu = check_message(conf, ctx, data, meta_conf)
-            local network = conf.network or jsonrpc.extract_network(ctx.var.host)
+            local network = ctx.var.unifra_network or conf.network or jsonrpc.extract_network(ctx.var.host)
             local subscription_request = is_subscription_request(parsed)
 
             if status ~= 200 then
