@@ -262,6 +262,8 @@ networks:
       - pos_getBlockByNumber
       - pos_getRewardsByEpoch
       - pos_getTransactionByNumber
+      - cfx_subscribe
+      - cfx_unsubscribe
     paid:
       - trace_block
       - trace_transaction
