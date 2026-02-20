@@ -819,6 +819,9 @@ function _M.access(conf, ctx)
 
     -- Spawn downstream thread (upstream -> client)
     local downstream_thread = ngx.thread.spawn(function()
+        local rx_frag_type = nil
+        local rx_frag_buf = {}
+
         while true do
             local data, typ, err = wc:recv_frame()
             if not data then
@@ -827,6 +830,23 @@ function _M.access(conf, ctx)
                     break
                 end;
                 goto continue
+            end
+
+            -- Handle fragmented frames
+            if typ ~= "ping" and typ ~= "pong" and typ ~= "close" then
+                if err == "again" then
+                    if not rx_frag_type then
+                        rx_frag_type = typ
+                    end
+                    table.insert(rx_frag_buf, data)
+                    goto continue
+                elseif rx_frag_type then
+                    table.insert(rx_frag_buf, data)
+                    data = table.concat(rx_frag_buf)
+                    typ = rx_frag_type
+                    rx_frag_buf = {}
+                    rx_frag_type = nil
+                end
             end
 
             if typ == "text" then
@@ -1022,6 +1042,9 @@ function _M.access(conf, ctx)
     end)
 
     -- Main thread: client -> upstream
+    local tx_frag_type = nil
+    local tx_frag_buf = {}
+
     while true do
         local data, typ, err = wb:recv_frame()
         cleanup_inflight(ngx.now(), wb)
@@ -1032,6 +1055,23 @@ function _M.access(conf, ctx)
                 break
             end;
             goto continue_loop
+        end
+
+        -- Handle fragmented frames
+        if typ ~= "ping" and typ ~= "pong" and typ ~= "close" then
+            if err == "again" then
+                if not tx_frag_type then
+                    tx_frag_type = typ
+                end
+                table.insert(tx_frag_buf, data)
+                goto continue_loop
+            elseif tx_frag_type then
+                table.insert(tx_frag_buf, data)
+                data = table.concat(tx_frag_buf)
+                typ = tx_frag_type
+                tx_frag_buf = {}
+                tx_frag_type = nil
+            end
         end
 
         if typ == "close" then
