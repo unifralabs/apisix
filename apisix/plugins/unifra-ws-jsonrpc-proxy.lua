@@ -406,7 +406,10 @@ end
 local buffers = {}
 
 local function is_subscription_method(method)
-    return method == "eth_subscribe" or method == "eth_unsubscribe"
+    if not method then return false end
+    -- Match any chain's subscribe/unsubscribe methods
+    -- e.g., eth_subscribe, cfx_subscribe, eth_unsubscribe, cfx_unsubscribe
+    return method:sub(-10) == "_subscribe" or method:sub(-12) == "_unsubscribe"
 end
 
 local function is_subscription_request(parsed)
@@ -848,7 +851,7 @@ function _M.access(conf, ctx)
                         data = cjson.encode(json_resp) -- Re-encode with original ID
                         rewritten = true
                         
-                        -- Map subscription ID if this was an eth_subscribe response
+                        -- Map subscription ID if this was a subscribe response (eth_subscribe, cfx_subscribe, etc.)
                         if pending_sub_type and json_resp.result then
                             -- json_resp.result is the subscription_id (e.g., "0x12345...")
                             local subscription_id = tostring(json_resp.result)
@@ -857,9 +860,10 @@ function _M.access(conf, ctx)
                             pending_subscriptions[internal_id_key] = nil -- Cleanup
                         end
                         
-                        -- Log unsubscribe success
-                        if req_ctx.extra_info and req_ctx.extra_info.method == "eth_unsubscribe" then
-                            core.log.info("ws: unsubscribed, user=", base_info.user_id, ", result=", tostring(json_resp.result))
+                        -- Log unsubscribe success (eth_unsubscribe, cfx_unsubscribe, etc.)
+                        local req_method = req_ctx.extra_info and req_ctx.extra_info.method
+                        if req_method and req_method:sub(-12) == "_unsubscribe" then
+                            core.log.info("ws: unsubscribed (", req_method, "), user=", base_info.user_id, ", result=", tostring(json_resp.result))
                         end
 
                         log_jsonrpc(ctx, conf, base_info, {
@@ -895,16 +899,18 @@ function _M.access(conf, ctx)
                             metadata_only = pending_sub_type ~= nil,
                             extra_info = {
                                 network = network,
-                                method = pending_sub_type and "eth_subscribe" or nil,
+                                method = pending_sub_type and (req_ctx and req_ctx.extra_info and req_ctx.extra_info.method or "subscribe") or nil,
                                 cu_cost = 0,
                             }
                         }, bp)
                     end
                 elseif json_resp then
-                     -- Notification from upstream
-                     local is_notification = (json_resp.id == nil and json_resp.method == "eth_subscription")
+                     -- Notification from upstream (eth_subscription, cfx_subscription, etc.)
+                     local is_notification = (json_resp.id == nil
+                         and json_resp.method and type(json_resp.method) == "string"
+                         and json_resp.method:sub(-13) == "_subscription")
                      if is_notification then
-                         core.log.debug("ws: upstream push notification received, method=eth_subscription")
+                         core.log.debug("ws: upstream push notification received, method=", json_resp.method)
                      end
                      local push_cost
                      local event_type
@@ -932,7 +938,7 @@ function _M.access(conf, ctx)
                          if event_type == "default" and json_resp.params and json_resp.params.result then
                              local result = json_resp.params.result
                              if type(result) == "table" then
-                                 if result.parentHash and result.number then
+                                 if result.parentHash and (result.number or result.height) then
                                      event_type = "newHeads"
                                  elseif result.topics or result.logIndex then
                                      event_type = "logs"
@@ -982,7 +988,7 @@ function _M.access(conf, ctx)
                         metadata_only = is_notification,
                         extra_info = {
                             network = network,
-                            method = is_notification and "eth_subscription" or nil,
+                            method = is_notification and json_resp.method or nil,
                             cu_cost = is_notification and push_cost or 0,
                             is_notification = is_notification,
                             subscription_type = is_notification and event_type or nil
@@ -1121,14 +1127,14 @@ function _M.access(conf, ctx)
                     }
                 }
                 
-                -- Track eth_subscribe requests for subscription ID mapping
+                -- Track subscribe requests for subscription ID mapping (eth_subscribe, cfx_subscribe, etc.)
                 -- When response comes back, we'll map subscription_id -> event_type
-                if method_name == "eth_subscribe" and json_ops.params and #json_ops.params > 0 then
+                if method_name and method_name:sub(-10) == "_subscribe" and json_ops.params and #json_ops.params > 0 then
                     local sub_type = json_ops.params[1] -- e.g., "newHeads", "logs", "newPendingTransactions"
                     pending_subscriptions[internal_id_str] = sub_type
-                    core.log.info("ws: eth_subscribe request, user=", base_info.user_id, ", type=", sub_type, ", internal_id=", internal_id_str)
-                elseif method_name == "eth_unsubscribe" and json_ops.params and #json_ops.params > 0 then
-                    core.log.info("ws: eth_unsubscribe request, user=", base_info.user_id, ", subscription_id=", json_ops.params[1])
+                    core.log.info("ws: subscribe request (", method_name, "), user=", base_info.user_id, ", type=", sub_type, ", internal_id=", internal_id_str)
+                elseif method_name and method_name:sub(-12) == "_unsubscribe" and json_ops.params and #json_ops.params > 0 then
+                    core.log.info("ws: unsubscribe request (", method_name, "), user=", base_info.user_id, ", subscription_id=", json_ops.params[1])
                 end
                 
                 -- Rewrite ID in JSON
