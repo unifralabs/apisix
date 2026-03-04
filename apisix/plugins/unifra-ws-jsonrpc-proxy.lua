@@ -880,11 +880,11 @@ function _M.access(conf, ctx)
                 if json_resp then
                     if json_resp.id ~= nil then
                         internal_id_key = tostring(json_resp.id)
-                    elseif type(json_resp) == "table" and #json_resp > 0 and type(json_resp[1]) == "table" then
+                    elseif type(json_resp) == "table" and #json_resp > 0 then
                         is_batch_resp = true
                         for _, res in ipairs(json_resp) do
-                            if res.id ~= nil then
-                                internal_id_key = "BATCH_" .. tostring(res.id)
+                            if type(res) == "table" and res.id ~= nil then
+                                internal_id_key = tostring(res.id)
                                 break
                             end
                         end
@@ -900,8 +900,24 @@ function _M.access(conf, ctx)
                         local duration = end_time - req_ctx.start_time
                         
                         -- RESTORE Original ID in the response before sending to client
-                        if not is_batch_resp then
-                            json_resp.id = req_ctx.orig_id
+                        if is_batch_resp then
+                            for _, res in ipairs(json_resp) do
+                                if type(res) == "table" and res.id ~= nil then
+                                    local str_id = tostring(res.id)
+                                    if req_ctx.id_map and req_ctx.id_map[str_id] ~= nil then
+                                        res.id = req_ctx.id_map[str_id]
+                                    end
+                                end
+                            end
+                            data = cjson.encode(json_resp)
+                            rewritten = true
+                        else
+                            -- Single response
+                            if req_ctx.id_map and req_ctx.id_map[internal_id_key] ~= nil then
+                                json_resp.id = req_ctx.id_map[internal_id_key]
+                            else
+                                json_resp.id = req_ctx.orig_id -- Fallback
+                            end
                             data = cjson.encode(json_resp) -- Re-encode with original ID
                             rewritten = true
                         end
@@ -921,17 +937,28 @@ function _M.access(conf, ctx)
                             core.log.info("ws: unsubscribed (", req_method, "), user=", base_info.user_id, ", result=", tostring(json_resp.result))
                         end
 
-                        log_jsonrpc(ctx, conf, base_info, {
-                            request_data = req_ctx.data,
-                            response_data = data,
-                            duration = duration,
-                            status = 200,
-                            metadata_only = req_ctx.metadata_only,
-                            extra_info = req_ctx.extra_info
-                        }, bp)
+                        -- Process Kafka log ONLY ONCE for the entire batch context
+                        if not req_ctx.processed then
+                            req_ctx.processed = true
+                            log_jsonrpc(ctx, conf, base_info, {
+                                request_data = req_ctx.data,
+                                response_data = data,
+                                duration = duration,
+                                status = 200,
+                                metadata_only = req_ctx.metadata_only,
+                                extra_info = req_ctx.extra_info
+                            }, bp)
+                        end
                         
-                        -- Cleanup
-                        inflight_requests[internal_id_key] = nil
+                        -- Cleanup ALL internal IDs associated with this req_ctx
+                        if req_ctx.internal_ids then
+                            for _, iid in ipairs(req_ctx.internal_ids) do
+                                inflight_requests[iid] = nil
+                                expired_request_ids[iid] = nil
+                            end
+                        else
+                            inflight_requests[internal_id_key] = nil
+                        end
                     elseif expired_request_ids[internal_id_key] then
                         expired_request_ids[internal_id_key] = nil
                         core.log.warn("ws-jsonrpc-proxy: dropping late response for expired request id: ", internal_id_key)
@@ -1170,7 +1197,7 @@ function _M.access(conf, ctx)
             local method_name = "unknown"
             local req_id = nil
             local is_batch = false
-            local batch_first_id = nil
+            local has_ids = false
             
             if parsed then
                 if parsed.is_batch then
@@ -1179,61 +1206,82 @@ function _M.access(conf, ctx)
                     if json_ops and type(json_ops) == "table" then
                         for _, req in ipairs(json_ops) do
                             if type(req) == "table" and req.id ~= nil then
-                                batch_first_id = req.id
+                                has_ids = true
                                 break
                             end
                         end
                     end
                 elseif json_ops and json_ops.method then
                     method_name = json_ops.method
-                    req_id = json_ops.id
+                    if json_ops.id ~= nil then
+                        req_id = json_ops.id
+                        has_ids = true
+                    end
                 end
             end
             
             -- Prepare data to send (default to original)
             local data_to_send = data
 
-            if (req_id and not is_batch) or (is_batch and batch_first_id ~= nil) then
-                local internal_id_str
-                
-                if is_batch then
-                    internal_id_str = "BATCH_" .. tostring(batch_first_id)
-                else
-                    -- Generate Internal ID
-                    request_counter = request_counter + 1
-                    -- Use simple monotonic ID for this connection to save bytes
-                    local internal_id = request_counter
-                    internal_id_str = tostring(internal_id)
+            if has_ids then
+                local req_ctx = {
+                    start_time = ngx.now(),
+                    orig_id = req_id,       -- Keep for single request backward compatibility
+                    data = data,            -- Keep original Request Data for logging
+                    metadata_only = is_subscription_method(method_name),
+                    extra_info = {
+                        network = network,
+                        method = method_name,
+                        request_id = req_id,  -- Will set properly below for batch
+                        cu_cost = total_cu or 0,
+                        cu_costs_str = cu_costs_str,
+                    },
+                    id_map = {},
+                    internal_ids = {},
+                    processed = false
+                }
 
-                    -- Track subscribe requests for subscription ID mapping (eth_subscribe, cfx_subscribe, etc.)
-                    -- When response comes back, we'll map subscription_id -> event_type
+                if is_batch then
+                    local first_orig_id = nil
+                    for _, req in ipairs(json_ops) do
+                        if type(req) == "table" and req.id ~= nil then
+                            request_counter = request_counter + 1
+                            local internal_id = request_counter
+                            local internal_id_str = tostring(internal_id)
+                            
+                            req_ctx.id_map[internal_id_str] = req.id
+                            table.insert(req_ctx.internal_ids, internal_id_str)
+                            if not first_orig_id then
+                                first_orig_id = req.id
+                            end
+                            req.id = internal_id
+                            
+                            inflight_requests[internal_id_str] = req_ctx
+                        end
+                    end
+                    req_ctx.extra_info.request_id = first_orig_id
+                    data_to_send = cjson.encode(json_ops)
+                else
+                    request_counter = request_counter + 1
+                    local internal_id = request_counter
+                    local internal_id_str = tostring(internal_id)
+
+                    -- Track subscribe requests for subscription ID mapping
                     if method_name and method_name:sub(-10) == "_subscribe" and json_ops.params and #json_ops.params > 0 then
-                        local sub_type = json_ops.params[1] -- e.g., "newHeads", "logs", "newPendingTransactions"
+                        local sub_type = json_ops.params[1]
                         pending_subscriptions[internal_id_str] = sub_type
                         core.log.info("ws: subscribe request (", method_name, "), user=", base_info.user_id, ", type=", sub_type, ", internal_id=", internal_id_str)
                     elseif method_name and method_name:sub(-12) == "_unsubscribe" and json_ops.params and #json_ops.params > 0 then
                         core.log.info("ws: unsubscribe request (", method_name, "), user=", base_info.user_id, ", subscription_id=", json_ops.params[1])
                     end
                     
-                    -- Rewrite ID in JSON
+                    req_ctx.id_map[internal_id_str] = req_id
+                    table.insert(req_ctx.internal_ids, internal_id_str)
                     json_ops.id = internal_id
                     data_to_send = cjson.encode(json_ops)
+                    
+                    inflight_requests[internal_id_str] = req_ctx
                 end
-
-                -- Store mapping
-                inflight_requests[internal_id_str] = {
-                    start_time = ngx.now(),
-                    orig_id = is_batch and batch_first_id or req_id,       -- Keep original ID to restore later
-                    data = data,            -- Keep original Request Data for logging
-                    metadata_only = is_subscription_method(method_name),
-                    extra_info = {
-                        network = network,
-                        method = method_name,
-                        request_id = is_batch and batch_first_id or req_id,
-                        cu_cost = total_cu or 0,
-                        cu_costs_str = cu_costs_str,
-                    }
-                }
             else
                 -- Notification or Batch
                 -- Log immediately as we don't track them with ID rewriting yet
