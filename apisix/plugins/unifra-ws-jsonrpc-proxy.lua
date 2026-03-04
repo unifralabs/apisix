@@ -1172,7 +1172,7 @@ function _M.access(conf, ctx)
                     response_data = error_resp,
                     duration = 0,
                     status = status,
-                    metadata_only = subscription_request,
+                    metadata_only = false,
                     extra_info = {
                         network = network,
                         method = method_name,
@@ -1228,7 +1228,7 @@ function _M.access(conf, ctx)
                     start_time = ngx.now(),
                     orig_id = req_id,       -- Keep for single request backward compatibility
                     data = data,            -- Keep original Request Data for logging
-                    metadata_only = is_subscription_method(method_name),
+                    metadata_only = false,
                     extra_info = {
                         network = network,
                         method = method_name,
@@ -1290,7 +1290,7 @@ function _M.access(conf, ctx)
                     response_data = "",
                     duration = 0,
                     status = 200,
-                    metadata_only = subscription_request,
+                    metadata_only = false,
                     extra_info = {
                         network = network,
                         method = method_name,
