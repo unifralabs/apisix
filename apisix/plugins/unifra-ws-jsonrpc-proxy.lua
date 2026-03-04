@@ -873,10 +873,25 @@ function _M.access(conf, ctx)
                 local json_resp = cjson.decode(data)
                 local req_ctx = nil
                 local rewritten = false
+                local internal_id_key = nil
+                local is_batch_resp = false
                 
                 -- Try to find matching request using Internal ID
-                if json_resp and json_resp.id then
-                    local internal_id_key = tostring(json_resp.id)
+                if json_resp then
+                    if json_resp.id ~= nil then
+                        internal_id_key = tostring(json_resp.id)
+                    elseif type(json_resp) == "table" and #json_resp > 0 and type(json_resp[1]) == "table" then
+                        is_batch_resp = true
+                        for _, res in ipairs(json_resp) do
+                            if res.id ~= nil then
+                                internal_id_key = "BATCH_" .. tostring(res.id)
+                                break
+                            end
+                        end
+                    end
+                end
+
+                if internal_id_key then
                     req_ctx = inflight_requests[internal_id_key]
                     local pending_sub_type = pending_subscriptions[internal_id_key]
                     
@@ -885,9 +900,11 @@ function _M.access(conf, ctx)
                         local duration = end_time - req_ctx.start_time
                         
                         -- RESTORE Original ID in the response before sending to client
-                        json_resp.id = req_ctx.orig_id
-                        data = cjson.encode(json_resp) -- Re-encode with original ID
-                        rewritten = true
+                        if not is_batch_resp then
+                            json_resp.id = req_ctx.orig_id
+                            data = cjson.encode(json_resp) -- Re-encode with original ID
+                            rewritten = true
+                        end
                         
                         -- Map subscription ID if this was a subscribe response (eth_subscribe, cfx_subscribe, etc.)
                         if pending_sub_type and json_resp.result then
@@ -1153,11 +1170,20 @@ function _M.access(conf, ctx)
             local method_name = "unknown"
             local req_id = nil
             local is_batch = false
+            local batch_first_id = nil
             
             if parsed then
                 if parsed.is_batch then
                     method_name = "BATCH"
                     is_batch = true
+                    if json_ops and type(json_ops) == "table" then
+                        for _, req in ipairs(json_ops) do
+                            if type(req) == "table" and req.id ~= nil then
+                                batch_first_id = req.id
+                                break
+                            end
+                        end
+                    end
                 elseif json_ops and json_ops.method then
                     method_name = json_ops.method
                     req_id = json_ops.id
@@ -1167,41 +1193,47 @@ function _M.access(conf, ctx)
             -- Prepare data to send (default to original)
             local data_to_send = data
 
-            if req_id and not is_batch then
-                -- Generate Internal ID
-                request_counter = request_counter + 1
-                -- Use simple monotonic ID for this connection to save bytes
-                local internal_id = request_counter
-                local internal_id_str = tostring(internal_id)
+            if (req_id and not is_batch) or (is_batch and batch_first_id ~= nil) then
+                local internal_id_str
+                
+                if is_batch then
+                    internal_id_str = "BATCH_" .. tostring(batch_first_id)
+                else
+                    -- Generate Internal ID
+                    request_counter = request_counter + 1
+                    -- Use simple monotonic ID for this connection to save bytes
+                    local internal_id = request_counter
+                    internal_id_str = tostring(internal_id)
+
+                    -- Track subscribe requests for subscription ID mapping (eth_subscribe, cfx_subscribe, etc.)
+                    -- When response comes back, we'll map subscription_id -> event_type
+                    if method_name and method_name:sub(-10) == "_subscribe" and json_ops.params and #json_ops.params > 0 then
+                        local sub_type = json_ops.params[1] -- e.g., "newHeads", "logs", "newPendingTransactions"
+                        pending_subscriptions[internal_id_str] = sub_type
+                        core.log.info("ws: subscribe request (", method_name, "), user=", base_info.user_id, ", type=", sub_type, ", internal_id=", internal_id_str)
+                    elseif method_name and method_name:sub(-12) == "_unsubscribe" and json_ops.params and #json_ops.params > 0 then
+                        core.log.info("ws: unsubscribe request (", method_name, "), user=", base_info.user_id, ", subscription_id=", json_ops.params[1])
+                    end
+                    
+                    -- Rewrite ID in JSON
+                    json_ops.id = internal_id
+                    data_to_send = cjson.encode(json_ops)
+                end
 
                 -- Store mapping
                 inflight_requests[internal_id_str] = {
                     start_time = ngx.now(),
-                    orig_id = req_id,       -- Keep original ID to restore later
+                    orig_id = is_batch and batch_first_id or req_id,       -- Keep original ID to restore later
                     data = data,            -- Keep original Request Data for logging
                     metadata_only = is_subscription_method(method_name),
                     extra_info = {
                         network = network,
                         method = method_name,
-                        request_id = req_id,
+                        request_id = is_batch and batch_first_id or req_id,
                         cu_cost = total_cu or 0,
                         cu_costs_str = cu_costs_str,
                     }
                 }
-                
-                -- Track subscribe requests for subscription ID mapping (eth_subscribe, cfx_subscribe, etc.)
-                -- When response comes back, we'll map subscription_id -> event_type
-                if method_name and method_name:sub(-10) == "_subscribe" and json_ops.params and #json_ops.params > 0 then
-                    local sub_type = json_ops.params[1] -- e.g., "newHeads", "logs", "newPendingTransactions"
-                    pending_subscriptions[internal_id_str] = sub_type
-                    core.log.info("ws: subscribe request (", method_name, "), user=", base_info.user_id, ", type=", sub_type, ", internal_id=", internal_id_str)
-                elseif method_name and method_name:sub(-12) == "_unsubscribe" and json_ops.params and #json_ops.params > 0 then
-                    core.log.info("ws: unsubscribe request (", method_name, "), user=", base_info.user_id, ", subscription_id=", json_ops.params[1])
-                end
-                
-                -- Rewrite ID in JSON
-                json_ops.id = internal_id
-                data_to_send = cjson.encode(json_ops)
             else
                 -- Notification or Batch
                 -- Log immediately as we don't track them with ID rewriting yet
