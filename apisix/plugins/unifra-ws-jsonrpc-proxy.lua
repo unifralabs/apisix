@@ -404,6 +404,7 @@ end
 
 -- Batch processor for Kafka logging
 local buffers = {}
+local producers = {}
 
 local function is_subscription_method(method)
     if not method then return false end
@@ -469,7 +470,11 @@ local function get_batch_processor(meta_conf, conf, topic_override)
 
         core.log.debug("ws: flushing ", #entries, " logs to kafka topic: ", topic)
 
-        local p = producer:new(broker_list, prod_conf)
+        local p = producers[key]
+        if not p then
+            p = producer:new(broker_list, prod_conf)
+            producers[key] = p
+        end
         
         for _, entry in ipairs(entries) do
             local json_str = core.json.encode(entry)
