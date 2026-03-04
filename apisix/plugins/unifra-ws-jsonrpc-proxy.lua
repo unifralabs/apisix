@@ -472,6 +472,7 @@ local function get_batch_processor(meta_conf, conf, topic_override)
 
         local p = producers[key]
         if not p then
+            core.log.info("ws: creating new kafka producer for key: ", key)
             p = producer:new(broker_list, prod_conf)
             producers[key] = p
         end
