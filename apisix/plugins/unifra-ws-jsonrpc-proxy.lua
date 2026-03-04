@@ -1185,6 +1185,7 @@ function _M.access(conf, ctx)
                         method = method_name,
                         request_id = req_id,
                         cu_cost = total_cu or 0,
+                        cu_costs_str = cu_costs_str,
                     }
                 }
                 
@@ -1215,6 +1216,7 @@ function _M.access(conf, ctx)
                         method = method_name,
                         request_id = req_id,
                         cu_cost = total_cu or 0,
+                        cu_costs_str = cu_costs_str,
                     }
                 }, bp)
             end
