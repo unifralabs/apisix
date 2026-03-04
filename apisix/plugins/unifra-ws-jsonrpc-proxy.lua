@@ -181,11 +181,12 @@ end
 -- @return string|nil error response JSON
 -- @return table|nil parsed JSON-RPC result
 -- @return number|nil total CU cost (if calculated)
+-- @return string|nil cu_costs JSON array string
 local function check_message(conf, ctx, data, meta_conf)
     -- Parse JSON-RPC
     local result, err = jsonrpc.parse(data)
     if err then
-        return 400, jsonrpc.error_response(jsonrpc.ERROR_PARSE, err, nil), nil, nil
+        return 400, jsonrpc.error_response(jsonrpc.ERROR_PARSE, err, nil), nil, nil, nil
     end
 
     local network = ctx.var.unifra_network or conf.network or jsonrpc.extract_network(ctx.var.host)
@@ -193,7 +194,7 @@ local function check_message(conf, ctx, data, meta_conf)
 
     -- Bypass check
     if should_bypass(network, conf.bypass_networks) then
-        return 200, nil, result, nil
+        return 200, nil, result, nil, nil
     end
 
     -- Load configs using unified config module (supports hot reload)
@@ -220,15 +221,21 @@ local function check_message(conf, ctx, data, meta_conf)
     local cu_config, cu_load_err = cu_mod.load_config(ctx, cu_path)
     if cu_load_err then
         core.log.error("ws: failed to load CU pricing: ", cu_load_err)
-        return 500, jsonrpc.error_response(jsonrpc.ERROR_INTERNAL, "config load failed", nil), result, nil
+        return 500, jsonrpc.error_response(jsonrpc.ERROR_INTERNAL, "config load failed", nil), result, nil, nil
     end
     if not cu_config then
         core.log.error("ws: failed to load CU pricing: empty config")
-        return 500, jsonrpc.error_response(jsonrpc.ERROR_INTERNAL, "config load failed", nil), result, nil
+        return 500, jsonrpc.error_response(jsonrpc.ERROR_INTERNAL, "config load failed", nil), result, nil, nil
     end
 
     -- Calculate CU early so logs can include it even on errors
     local total_cu = cu_mod.calculate(methods, cu_config)
+    
+    local costs_arr = {}
+    for _, method in ipairs(methods or {}) do
+        table.insert(costs_arr, cu_mod.get_method_cu(method, cu_config))
+    end
+    local cu_costs_str = require("cjson.safe").encode(costs_arr)
 
     -- Whitelist check
     local monthly_quota = tonumber(ctx.var.monthly_quota) or 0
@@ -240,7 +247,7 @@ local function check_message(conf, ctx, data, meta_conf)
         if wl_err:find("requires paid") then
             code = jsonrpc.ERROR_FORBIDDEN
         end
-        return 405, jsonrpc.error_response(code, wl_err, result.ids and result.ids[1]), result, total_cu
+        return 405, jsonrpc.error_response(code, wl_err, result.ids and result.ids[1]), result, total_cu, cu_costs_str
     end
 
     -- Rate limit check (per-second sliding window, same as HTTP path)
@@ -337,7 +344,7 @@ local function check_message(conf, ctx, data, meta_conf)
                         jsonrpc.ERROR_INTERNAL,
                         "rate limiting service unavailable",
                         result.ids and result.ids[1]
-                    ), result, total_cu
+                    ), result, total_cu, cu_costs_str
                 end
             else
                 -- Parse result: {allowed (1/0), current_cu, remaining}
@@ -348,7 +355,7 @@ local function check_message(conf, ctx, data, meta_conf)
                         jsonrpc.ERROR_RATE_LIMITED,
                         "rate limit exceeded",
                         result.ids and result.ids[1]
-                    ), result, total_cu
+                    ), result, total_cu, cu_costs_str
                 end
             end
         end
@@ -383,7 +390,7 @@ local function check_message(conf, ctx, data, meta_conf)
                     jsonrpc.ERROR_INTERNAL,
                     "monthly quota service unavailable",
                     result.ids and result.ids[1]
-                ), result, total_cu
+                ), result, total_cu, cu_costs_str
             end
 
             if not allowed then
@@ -393,12 +400,12 @@ local function check_message(conf, ctx, data, meta_conf)
                     jsonrpc.ERROR_QUOTA_EXCEEDED,
                     "monthly quota exceeded",
                     result.ids and result.ids[1]
-                ), result, total_cu
+                ), result, total_cu, cu_costs_str
             end
         end
     end
 
-    return 200, nil, result, total_cu
+    return 200, nil, result, total_cu, cu_costs_str
 end
 
 
@@ -523,7 +530,12 @@ local function log_jsonrpc(ctx, conf, base_info, log_details, bp)
         duration = duration,
         client_ip = ctx.var.remote_addr,
         response_status_code = status,
-        time = ngx.now(),
+        time = tostring(ngx.now()),
+        
+        -- Native ClickHouse Queue Schema Fields for Materialized Views (HTTP schema compatible)
+        total_cu_cost = extra_info.cu_cost,
+        cu_costs = extra_info.cu_costs_str or ("[" .. tostring(extra_info.cu_cost or 0) .. "]"),
+
         jsonrpc_method = method,
         
         -- Extra fields for detailed debugging/metrics
@@ -927,6 +939,7 @@ function _M.access(conf, ctx)
                                 network = network,
                                 method = pending_sub_type and (req_ctx and req_ctx.extra_info and req_ctx.extra_info.method or "subscribe") or nil,
                                 cu_cost = 0,
+                                cu_costs_str = "[0]",
                             }
                         }, bp)
                     end
@@ -1016,6 +1029,7 @@ function _M.access(conf, ctx)
                             network = network,
                             method = is_notification and json_resp.method or nil,
                             cu_cost = is_notification and push_cost or 0,
+                            cu_costs_str = is_notification and ("[" .. tostring(push_cost or 0) .. "]") or "[0]",
                             is_notification = is_notification,
                             subscription_type = is_notification and event_type or nil
                         }
@@ -1091,7 +1105,7 @@ function _M.access(conf, ctx)
         elseif typ == "text" then
             core.log.debug("ws: client request received, size=", #data)
             -- Check JSON-RPC message
-            local status, error_resp, parsed, total_cu = check_message(conf, ctx, data, meta_conf)
+            local status, error_resp, parsed, total_cu, cu_costs_str = check_message(conf, ctx, data, meta_conf)
             local network = ctx.var.unifra_network or conf.network or jsonrpc.extract_network(ctx.var.host)
             local subscription_request = is_subscription_request(parsed)
 
@@ -1120,6 +1134,7 @@ function _M.access(conf, ctx)
                         method = method_name,
                         request_id = req_id,
                         cu_cost = total_cu or 0,
+                        cu_costs_str = cu_costs_str,
                         error = error_resp
                     }
                 }, bp)
