@@ -61,6 +61,7 @@ local networks = {
     "xlayer-mainnet",
     "dogeos-mainnet",
     "dogeos-testnet",
+    "arc-testnet",
     "bsc-mainnet",
 
 
@@ -416,19 +417,19 @@ local zks_methods = {
 
 local bsc_methods_free = {
     "eth_getHeaderByNumber",
-    "eth_getHeaderByHash"
-    "eth_newFinalizedHeaderFilter"
-    "eth_getFinalizedHeader"
-    "eth_getFinalizedBlock"
-    "eth_getTransactionsByBlockNumber"
-    "eth_getTransactionDataAndReceipt"
-    "eth_getBlobSidecars"
-    "eth_getBlobSidecarByTxHash"
+    "eth_getHeaderByHash",
+    "eth_newFinalizedHeaderFilter",
+    "eth_getFinalizedHeader",
+    "eth_getFinalizedBlock",
+    "eth_getTransactionsByBlockNumber",
+    "eth_getTransactionDataAndReceipt",
+    "eth_getBlobSidecars",
+    "eth_getBlobSidecarByTxHash",
 }
 
 local bsc_methods_paid = {
-    "parlia_getValidators"
-    "parlia_getSnapshot"
+    "parlia_getValidators",
+    "parlia_getSnapshot",
 }
 
 
@@ -520,6 +521,9 @@ function _M.init()
             network == "starknet-testnet" or network == "staging-starknet-testnet" then
             _M.free_list[network] = merge_methods(starknet_methods)
             _M.paid_list[network] = _M.free_list[network]
+        elseif network == "arc-testnet" then
+            _M.free_list[network] = merge_methods(web3_methods, net_methods, eth_methods)
+            _M.paid_list[network] = merge_methods(web3_methods, net_methods, eth_methods, trace_methods, debug_methods)
         elseif network == "bsc-mainnet" or network == "staging-bsc-mainnet" then
             _M.free_list[network] = merge_methods(web3_methods, net_methods, eth_methods, bsc_methods_free)
             _M.paid_list[network] = merge_methods(web3_methods, net_methods, eth_methods, bsc_methods_free, trace_methods, debug_methods, bsc_methods_paid)
