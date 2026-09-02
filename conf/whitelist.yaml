@@ -419,6 +419,15 @@ networks:
     paid:
       - debug_*
 
+  arc-testnet:
+    free:
+      - web3_*
+      - net_*
+      - eth_*
+    paid:
+      - trace_*
+      - debug_*
+
   op-mainnet:
     free:
       - web3_*
@@ -579,4 +588,3 @@ networks:
       - debug_*
       - parlia_getValidators
       - parlia_getSnapshot
-
