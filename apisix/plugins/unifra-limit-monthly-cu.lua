@@ -132,8 +132,8 @@ function _M.access(conf, ctx)
         core.log.error("Monthly quota check error: ", err, " (rejecting request)")
         return errors.response(
             ctx,
-            errors.ERR_INTERNAL,
-            "monthly quota service unavailable",
+            errors.ERR_SERVICE_UNAVAILABLE,
+            nil,
             ctx.jsonrpc and ctx.jsonrpc.ids and ctx.jsonrpc.ids[1]
         )
     end

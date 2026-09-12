@@ -62,11 +62,14 @@ def count():
     return len(request(MOCK)[1])
 
 
-def check_response(status, response, before, forwarded, error_code=None, http_status=None):
+def check_response(status, response, before, forwarded, error_code=None, http_status=None,
+                   error_message=None):
     if http_status is not None:
         assert status == http_status, (status, response)
     if error_code is not None:
         assert response["error"]["code"] == error_code, response
+        if error_message is not None:
+            assert response["error"]["message"] == error_message, response
     else:
         replies = response if isinstance(response, list) else [response]
         assert all(r and r.get("result", "").startswith("mock:") for r in replies), response
@@ -74,7 +77,8 @@ def check_response(status, response, before, forwarded, error_code=None, http_st
 
 
 def http_case(path="/", host="arc-testnet-public.unifra.io", payload=None,
-              key=None, error_code=None, status=200, forwarded=1, headers=None, compressed=False):
+              key=None, error_code=None, status=200, forwarded=1, headers=None, compressed=False,
+              error_message=None):
     payload = rpc() if payload is None else payload
     body = json.dumps(payload).encode()
     hdrs = {"Content-Type": "application/json", "Host": host}
@@ -86,7 +90,7 @@ def http_case(path="/", host="arc-testnet-public.unifra.io", payload=None,
         hdrs["Content-Encoding"] = "gzip"
     before = count()
     actual_status, response = request(PROXY + path, "POST", body, hdrs)
-    check_response(actual_status, response, before, forwarded, error_code, status)
+    check_response(actual_status, response, before, forwarded, error_code, status, error_message)
 
 
 class WebSocket:
@@ -127,12 +131,13 @@ class WebSocket:
 
 
 def ws_case(path="/ws-public", key=None, payload=None, error_code=None,
-            forwarded=1, binary=False, fragmented=False):
+            forwarded=1, binary=False, fragmented=False, error_message=None):
     ws = WebSocket(path, key)
     try:
         before = count()
         response = ws.call(rpc() if payload is None else payload, binary, fragmented)
-        check_response(None, response, before, forwarded, error_code)
+        check_response(None, response, before, forwarded, error_code,
+                       error_message=error_message)
     finally:
         ws.close()
 
@@ -265,7 +270,8 @@ def main():
     test("unknown network cannot bypass", lambda: http_case(path="/unknown", host="access.test",
          error_code=-32600, status=405, forwarded=0))
     test("missing whitelist fails closed", lambda: http_case(path="/missing-config", host="access.test",
-         error_code=-32603, status=500, forwarded=0))
+         error_code=-32603, status=503, forwarded=0,
+         error_message="Service temporarily unavailable"))
     for name in ("free-high", "legacy-boundary"):
         test(name + " denies paid HTTP", lambda: http_case(path="/private", host="access.test", key=keys[name], **denied))
     for name in ("paid-low", "legacy-high"):
@@ -325,7 +331,8 @@ def main():
             "redis_host": "redis", "whitelist_config_path": "/missing-whitelist.yaml"})
         time.sleep(1)
         try:
-            ws_case(error_code=-32603, forwarded=0)
+            ws_case(error_code=-32603, forwarded=0,
+                    error_message="Service temporarily unavailable")
         finally:
             admin("plugin_metadata/unifra-ws-jsonrpc-proxy", {"redis_host": "redis"})
     test("WS missing whitelist fails closed", missing_ws_config)

@@ -205,17 +205,32 @@ local function check_message(conf, ctx, data, meta_conf)
     local whitelist_config, wl_load_err = whitelist_mod.load_config(ctx, whitelist_path)
     if wl_load_err or not whitelist_config then
         core.log.error("ws: failed to load whitelist: ", wl_load_err)
-        return 500, jsonrpc.error_response(jsonrpc.ERROR_INTERNAL, "config load failed", nil), result, nil
+        return errors.ERR_SERVICE_UNAVAILABLE.http_status,
+            jsonrpc.error_response(
+                errors.ERR_SERVICE_UNAVAILABLE.code,
+                errors.ERR_SERVICE_UNAVAILABLE.message,
+                nil
+            ), result, nil
     end
 
     local cu_config, cu_load_err = cu_mod.load_config(ctx, cu_path)
     if cu_load_err then
         core.log.error("ws: failed to load CU pricing: ", cu_load_err)
-        return 500, jsonrpc.error_response(jsonrpc.ERROR_INTERNAL, "config load failed", nil), result, nil, nil
+        return errors.ERR_SERVICE_UNAVAILABLE.http_status,
+            jsonrpc.error_response(
+                errors.ERR_SERVICE_UNAVAILABLE.code,
+                errors.ERR_SERVICE_UNAVAILABLE.message,
+                nil
+            ), result, nil, nil
     end
     if not cu_config then
         core.log.error("ws: failed to load CU pricing: empty config")
-        return 500, jsonrpc.error_response(jsonrpc.ERROR_INTERNAL, "config load failed", nil), result, nil, nil
+        return errors.ERR_SERVICE_UNAVAILABLE.http_status,
+            jsonrpc.error_response(
+                errors.ERR_SERVICE_UNAVAILABLE.code,
+                errors.ERR_SERVICE_UNAVAILABLE.message,
+                nil
+            ), result, nil, nil
     end
 
     -- Calculate CU early so logs can include it even on errors
@@ -330,9 +345,9 @@ local function check_message(conf, ctx, data, meta_conf)
                 else
                     core.log.error("ws rate limit unavailable (sliding window): rejecting request, error: ",
                                   script_err or "circuit breaker open")
-                    return 500, jsonrpc.error_response(
-                        jsonrpc.ERROR_INTERNAL,
-                        "rate limiting service unavailable",
+                    return errors.ERR_SERVICE_UNAVAILABLE.http_status, jsonrpc.error_response(
+                        errors.ERR_SERVICE_UNAVAILABLE.code,
+                        errors.ERR_SERVICE_UNAVAILABLE.message,
                         result.ids and result.ids[1]
                     ), result, total_cu, cu_costs_str
                 end
@@ -376,9 +391,9 @@ local function check_message(conf, ctx, data, meta_conf)
 
             if quota_err then
                 core.log.error("ws monthly quota check error: ", quota_err)
-                return 500, jsonrpc.error_response(
-                    jsonrpc.ERROR_INTERNAL,
-                    "monthly quota service unavailable",
+                return errors.ERR_SERVICE_UNAVAILABLE.http_status, jsonrpc.error_response(
+                    errors.ERR_SERVICE_UNAVAILABLE.code,
+                    errors.ERR_SERVICE_UNAVAILABLE.message,
                     result.ids and result.ids[1]
                 ), result, total_cu, cu_costs_str
             end
@@ -1017,7 +1032,7 @@ function _M.access(conf, ctx)
                          local cu_config_loaded, cu_load_err = cu_mod.load_config(ctx, meta_conf.cu_config_path)
                          if cu_load_err or not cu_config_loaded then
                              core.log.error("ws: push pricing unavailable: ", cu_load_err)
-                             wb:send_close(1011, "Billing unavailable")
+                             wb:send_close(1011, errors.ERR_SERVICE_UNAVAILABLE.message)
                              break
                          end
                          if not cu_load_err and cu_config_loaded and cu_config_loaded.push_notification then
@@ -1076,7 +1091,7 @@ function _M.access(conf, ctx)
                                  
                                  if quota_err then
                                      core.log.error("ws: push billing failed: ", quota_err)
-                                     wb:send_close(1011, "Billing unavailable")
+                                     wb:send_close(1011, errors.ERR_SERVICE_UNAVAILABLE.message)
                                      break
                                  elseif not allowed then
                                      core.log.warn("ws: push quota exceeded for ", quota_key, ", closing connection")

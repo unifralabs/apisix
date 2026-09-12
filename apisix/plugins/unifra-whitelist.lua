@@ -10,6 +10,7 @@
 
 local core = require("apisix.core")
 local jsonrpc = require("unifra.jsonrpc.core")
+local errors = require("unifra.jsonrpc.errors")
 local whitelist = require("unifra.jsonrpc.whitelist")
 local access = require("unifra.jsonrpc.access")
 
@@ -71,10 +72,10 @@ function _M.access(conf, ctx)
     local config_cache, err = whitelist.load_config(ctx, conf.config_path, conf.config_ttl)
     if err or not config_cache then
         core.log.error("failed to load whitelist config: ", err, ", denying request")
-        core.response.set_header("Content-Type", "application/json")
-        return 500, jsonrpc.error_response(
-            jsonrpc.ERROR_INTERNAL,
-            "whitelist config unavailable",
+        return errors.response(
+            ctx,
+            errors.ERR_SERVICE_UNAVAILABLE,
+            nil,
             ctx.jsonrpc.ids and ctx.jsonrpc.ids[1]
         )
     end

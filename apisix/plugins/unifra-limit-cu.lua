@@ -215,8 +215,8 @@ function _M.sliding_window_check(conf, ctx, cu, limit, key_value)
         else
             return errors.response(
                 ctx,
-                errors.ERR_INTERNAL,
-                "rate limiting service unavailable",
+                errors.ERR_SERVICE_UNAVAILABLE,
+                nil,
                 ctx.jsonrpc and ctx.jsonrpc.ids and ctx.jsonrpc.ids[1]
             )
         end

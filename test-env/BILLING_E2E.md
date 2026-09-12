@@ -40,7 +40,7 @@ frame count.
 | Monthly quota rejection | The earlier per-second check may already have consumed request capacity | None | Does not reach the upstream; no partial batch charge |
 | Upstream RPC execution error | Already consumed | Already charged | Preserves admission-based billing; no refund based on the execution result |
 | Insufficient monthly quota for a notification | None | No additional charge | Does not forward the event; Close 1008 |
-| Notification billing service unavailable | None | No billing bypass allowed | Does not forward the event; Close 1011 |
+| Notification dependency unavailable | None | No billing bypass allowed | Does not forward the event; Close 1011 with the generic `Service temporarily unavailable` reason |
 
 Prices come from `conf/cu-pricing.yaml`. A large quota is not evidence of a paid
 RPC entitlement. Monthly ledgers use UTC calendar-month buckets. HTTP, WS, and
@@ -124,7 +124,7 @@ Each normal allow/reject case checks the response, the actual Redis monthly CU
 delta, and the number of RPC calls received by the mock. Dedicated rate-limit and
 notification cases also inspect the Redis per-second window. All test accounts
 have randomized prefixes; the suite never executes `FLUSHDB`. Fault injection
-runs last and pauses only the isolated Redis for one second. It does not stop
+runs last and briefly pauses only the isolated Redis. It does not stop
 production Redis or a Redis instance on the host.
 
 ## Verification boundaries

@@ -19,6 +19,8 @@ from test_access import admin, request, rpc, WebSocket, UPSTREAM, PROXY, count
 RUN = "billing-" + uuid.uuid4().hex[:10]
 PASSED = 0
 FAILED = []
+REDIS_TIMEOUT_MS = 1000
+REDIS_FAILURE_PAUSE_MS = 1500
 
 
 def redis(*args):
@@ -100,7 +102,7 @@ def run(name, fn):
 def setup():
     for plugin in ("unifra-limit-cu", "unifra-limit-monthly-cu", "unifra-ws-jsonrpc-proxy"):
         admin("plugin_metadata/" + plugin, {"redis_host": "redis", "redis_port": 6379,
-                                           "redis_timeout": 100})
+                                           "redis_timeout": REDIS_TIMEOUT_MS})
     admin("routes/billing-http", {"uri": "/billing-http", "host": "access.test",
         "methods": ["POST"], "upstream": UPSTREAM, "plugins": {
             "key-auth": {}, "unifra-jsonrpc-var": {"network": "arc-testnet"},
@@ -370,11 +372,12 @@ def push_redis_failure():
     try:
         sub = subscribe(ws, "logs")
         assert account.used() == 1
-        redis("CLIENT", "PAUSE", 1000, "ALL")
+        redis("CLIENT", "PAUSE", REDIS_FAILURE_PAUSE_MS, "ALL")
         assert push(sub)
         op, data = read_frame(ws.stream)
         assert op == 8 and struct.unpack("!H", data[:2])[0] == 1011, (op, data)
-        time.sleep(1.1)
+        assert data[2:].decode() == "Service temporarily unavailable", data
+        time.sleep((REDIS_FAILURE_PAUSE_MS + 100) / 1000)
         assert account.used() == 1
     finally: ws.close()
 

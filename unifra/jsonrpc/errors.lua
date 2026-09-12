@@ -71,6 +71,16 @@ _M.ERR_INTERNAL = {
     category = _M.CATEGORY_GATEWAY,
 }
 
+-- Public response for dependency/infrastructure failures. Keep the subsystem
+-- and failure reason in server logs; clients only need to know the request can
+-- be retried later.
+_M.ERR_SERVICE_UNAVAILABLE = {
+    code = jsonrpc_core.ERROR_INTERNAL,
+    http_status = 503,
+    message = "Service temporarily unavailable",
+    category = _M.CATEGORY_GATEWAY,
+}
+
 -- JSON-RPC error types (always HTTP 200)
 _M.ERR_PARSE_ERROR = {
     code = jsonrpc_core.ERROR_PARSE,
@@ -269,6 +279,8 @@ function _M.from_http_status(http_status)
         return _M.ERR_RATE_LIMITED
     elseif http_status == 400 then
         return _M.ERR_BAD_REQUEST
+    elseif http_status == 503 then
+        return _M.ERR_SERVICE_UNAVAILABLE
     elseif http_status >= 500 then
         return _M.ERR_INTERNAL
     else
