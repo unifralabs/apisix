@@ -18,6 +18,7 @@ local plugin_mod = require("apisix.plugin")
 local upstream_mod = require("apisix.upstream")
 local jsonrpc = require("unifra.jsonrpc.core")
 local whitelist_mod = require("unifra.jsonrpc.whitelist")
+local access = require("unifra.jsonrpc.access")
 local cu_mod = require("unifra.jsonrpc.cu")
 local redis_scripts = require("unifra.jsonrpc.redis_scripts")
 local redis_circuit_breaker = require("unifra.jsonrpc.redis_circuit_breaker")
@@ -47,11 +48,6 @@ local schema = {
             default = 60000,
             description = "WebSocket timeout in milliseconds"
         },
-        -- Paid tier threshold
-        paid_quota_threshold = {
-            type = "integer",
-            default = 1000000
-        },
         -- Rate limit degradation (for per-second rate limit only)
         allow_degradation = {
             type = "boolean",
@@ -80,6 +76,10 @@ local schema = {
         },
     },
 }
+
+for name, field in pairs(access.schema_properties) do
+    schema.properties[name] = field
+end
 
 local metadata_schema = {
     type = "object",
@@ -162,20 +162,6 @@ function _M.check_schema(conf)
 end
 
 
---- Check if network should bypass checks
-local function should_bypass(network, bypass_list)
-    if not network or not bypass_list then
-        return false
-    end
-    for _, pattern in ipairs(bypass_list) do
-        if network:find(pattern, 1, true) then
-            return true
-        end
-    end
-    return false
-end
-
-
 --- Run checks on a JSON-RPC message
 -- @return number status code (200 = ok, other = error)
 -- @return string|nil error response JSON
@@ -186,14 +172,18 @@ local function check_message(conf, ctx, data, meta_conf)
     -- Parse JSON-RPC
     local result, err = jsonrpc.parse(data)
     if err then
-        return 400, jsonrpc.error_response(jsonrpc.ERROR_PARSE, err, nil), nil, nil, nil
+        local code = jsonrpc.ERROR_PARSE
+        if err:find("empty batch") or err:find("missing method") then
+            code = jsonrpc.ERROR_INVALID_REQUEST
+        end
+        return 400, jsonrpc.error_response(code, err, nil), nil, nil, nil
     end
 
     local network = ctx.var.unifra_network or conf.network or jsonrpc.extract_network(ctx.var.host)
     local methods = result.methods
 
     -- Bypass check
-    if should_bypass(network, conf.bypass_networks) then
+    if access.should_bypass(conf, network) then
         return 200, nil, result, nil, nil
     end
 
@@ -213,7 +203,7 @@ local function check_message(conf, ctx, data, meta_conf)
     local redis_timeout = meta_conf.redis_timeout
 
     local whitelist_config, wl_load_err = whitelist_mod.load_config(ctx, whitelist_path)
-    if not whitelist_config then
+    if wl_load_err or not whitelist_config then
         core.log.error("ws: failed to load whitelist: ", wl_load_err)
         return 500, jsonrpc.error_response(jsonrpc.ERROR_INTERNAL, "config load failed", nil), result, nil
     end
@@ -238,8 +228,8 @@ local function check_message(conf, ctx, data, meta_conf)
     local cu_costs_str = require("cjson.safe").encode(costs_arr)
 
     -- Whitelist check
-    local monthly_quota = tonumber(ctx.var.monthly_quota) or 0
-    local is_paid = monthly_quota > conf.paid_quota_threshold
+    local is_paid, entitlement_source = access.is_paid(conf, ctx)
+    ctx.var.rpc_entitlement_source = entitlement_source
 
     local ok, wl_err = whitelist_mod.check(network, methods, is_paid, whitelist_config)
     if not ok then
@@ -798,6 +788,35 @@ function _M.access(conf, ctx)
     -- Pending subscriptions: Maps internal_request_id -> event_type
     -- Used to correlate eth_subscribe response with the subscription type
     local pending_subscriptions = {}
+    local pending_unsubscriptions = {}
+
+    local function track_subscription_request(id, request)
+        if type(request.method) ~= "string" or type(request.params) ~= "table" then
+            return
+        end
+        if request.method:sub(-10) == "_subscribe" then
+            pending_subscriptions[id] = request.params[1]
+        elseif request.method:sub(-12) == "_unsubscribe" then
+            pending_unsubscriptions[id] = request.params[1]
+        end
+    end
+
+    -- Run before restoring client IDs, for EVERY member of a batch response.
+    local function track_subscription_response(response)
+        if type(response) ~= "table" or response.id == nil then return end
+        local id = tostring(response.id)
+        if expired_request_ids[id] then return end
+        local event_type = pending_subscriptions[id]
+        if event_type and response.result ~= nil and not response.error then
+            subscription_map[tostring(response.result)] = event_type
+        end
+        local subscription_id = pending_unsubscriptions[id]
+        if subscription_id and response.result == true then
+            subscription_map[tostring(subscription_id)] = nil
+        end
+        pending_subscriptions[id] = nil
+        pending_unsubscriptions[id] = nil
+    end
 
     local function cleanup_inflight(now, wb)
         if (now - last_cleanup) < cleanup_interval then
@@ -809,6 +828,8 @@ function _M.access(conf, ctx)
         for internal_id, req_ctx in pairs(inflight_requests) do
             if now - req_ctx.start_time > inflight_ttl then
                 inflight_requests[internal_id] = nil
+                pending_subscriptions[internal_id] = nil
+                pending_unsubscriptions[internal_id] = nil
                 expired_request_ids[internal_id] = now
                 expired_requests[#expired_requests + 1] = req_ctx
             end
@@ -867,7 +888,7 @@ function _M.access(conf, ctx)
                 end
             end
 
-            if typ == "text" then
+            if typ == "text" or typ == "binary" then
                 -- Intercept response to rewrite ID and log
                 core.log.debug("ws: upstream response received, size=", #data)
                 local json_resp = cjson.decode(data)
@@ -894,6 +915,13 @@ function _M.access(conf, ctx)
                 if internal_id_key then
                     req_ctx = inflight_requests[internal_id_key]
                     local pending_sub_type = pending_subscriptions[internal_id_key]
+                    if is_batch_resp then
+                        for _, response in ipairs(json_resp) do
+                            track_subscription_response(response)
+                        end
+                    else
+                        track_subscription_response(json_resp)
+                    end
                     
                     if req_ctx then
                         local end_time = ngx.now()
@@ -920,15 +948,6 @@ function _M.access(conf, ctx)
                             end
                             data = cjson.encode(json_resp) -- Re-encode with original ID
                             rewritten = true
-                        end
-                        
-                        -- Map subscription ID if this was a subscribe response (eth_subscribe, cfx_subscribe, etc.)
-                        if pending_sub_type and json_resp.result then
-                            -- json_resp.result is the subscription_id (e.g., "0x12345...")
-                            local subscription_id = tostring(json_resp.result)
-                            subscription_map[subscription_id] = pending_sub_type
-                            core.log.info("ws: subscription created, user=", base_info.user_id, ", subscription_id=", subscription_id, ", type=", pending_sub_type)
-                            pending_subscriptions[internal_id_key] = nil -- Cleanup
                         end
                         
                         -- Log unsubscribe success (eth_unsubscribe, cfx_unsubscribe, etc.)
@@ -964,13 +983,6 @@ function _M.access(conf, ctx)
                         core.log.warn("ws-jsonrpc-proxy: dropping late response for expired request id: ", internal_id_key)
                         goto continue
                     else
-                        if pending_sub_type and json_resp.result then
-                            local subscription_id = tostring(json_resp.result)
-                            subscription_map[subscription_id] = pending_sub_type
-                            core.log.info("ws: subscription created, user=", base_info.user_id, ", subscription_id=", subscription_id, ", type=", pending_sub_type)
-                            pending_subscriptions[internal_id_key] = nil -- Cleanup
-                        end
-
                         -- Unmatched response (timeout? or unsolicited? or batch?)
                         -- If we didn't rewrite it (not found), pass through as is.
                         log_jsonrpc(ctx, conf, base_info, {
@@ -1003,6 +1015,11 @@ function _M.access(conf, ctx)
                          -- Load CU config to get push costs
                          local push_cost_config = nil
                          local cu_config_loaded, cu_load_err = cu_mod.load_config(ctx, meta_conf.cu_config_path)
+                         if cu_load_err or not cu_config_loaded then
+                             core.log.error("ws: push pricing unavailable: ", cu_load_err)
+                             wb:send_close(1011, "Billing unavailable")
+                             break
+                         end
                          if not cu_load_err and cu_config_loaded and cu_config_loaded.push_notification then
                              push_cost_config = cu_config_loaded.push_notification
                          end
@@ -1046,14 +1063,22 @@ function _M.access(conf, ctx)
                          local quota = tonumber(ctx.var.monthly_quota)
 
                          if quota and quota > 0 then
-                             local quota_key = ctx.var.quota_key or ctx.var.consumer_name
+                             local quota_key = ctx.var.quota_key
+                             if not quota_key or quota_key == "" then
+                                 quota_key = ctx.var.consumer_name
+                             end
                              if quota_key then
-                                 -- Async billing: check and increment
+                                 -- Pushes consume monthly CU only, not request CU/s.
+                                 -- Reserve CU before delivery; never forward on billing failure.
                                  local allowed, used, remaining, quota_err = billing.check_and_increment(
                                      redis_conf, ctx, quota_key, push_cost, quota
                                  )
                                  
-                                 if not allowed and not quota_err then
+                                 if quota_err then
+                                     core.log.error("ws: push billing failed: ", quota_err)
+                                     wb:send_close(1011, "Billing unavailable")
+                                     break
+                                 elseif not allowed then
                                      core.log.warn("ws: push quota exceeded for ", quota_key, ", closing connection")
                                      -- Send close frame
                                      wb:send_close(1008, "Quota Exceeded")
@@ -1143,10 +1168,10 @@ function _M.access(conf, ctx)
             wc:send_close()
             break
         elseif typ == "ping" then
-            wb:send_pong()
+            wb:send_pong(data)
         elseif typ == "pong" then
             wc:send_pong()
-        elseif typ == "text" then
+        elseif typ == "text" or typ == "binary" then
             core.log.debug("ws: client request received, size=", #data)
             -- Check JSON-RPC message
             local status, error_resp, parsed, total_cu, cu_costs_str = check_message(conf, ctx, data, meta_conf)
@@ -1177,8 +1202,9 @@ function _M.access(conf, ctx)
                         network = network,
                         method = method_name,
                         request_id = req_id,
-                        cu_cost = total_cu or 0,
-                        cu_costs_str = cu_costs_str,
+                        -- A rejected request was not admitted to monthly billing.
+                        cu_cost = 0,
+                        cu_costs_str = "[]",
                         error = error_resp
                     }
                 }, bp)
@@ -1255,6 +1281,7 @@ function _M.access(conf, ctx)
                                 first_orig_id = req.id
                             end
                             req.id = internal_id
+                            track_subscription_request(internal_id_str, req)
                             
                             inflight_requests[internal_id_str] = req_ctx
                         end
@@ -1265,16 +1292,8 @@ function _M.access(conf, ctx)
                     request_counter = request_counter + 1
                     local internal_id = request_counter
                     local internal_id_str = tostring(internal_id)
+                    track_subscription_request(internal_id_str, json_ops)
 
-                    -- Track subscribe requests for subscription ID mapping
-                    if method_name and method_name:sub(-10) == "_subscribe" and json_ops.params and #json_ops.params > 0 then
-                        local sub_type = json_ops.params[1]
-                        pending_subscriptions[internal_id_str] = sub_type
-                        core.log.info("ws: subscribe request (", method_name, "), user=", base_info.user_id, ", type=", sub_type, ", internal_id=", internal_id_str)
-                    elseif method_name and method_name:sub(-12) == "_unsubscribe" and json_ops.params and #json_ops.params > 0 then
-                        core.log.info("ws: unsubscribe request (", method_name, "), user=", base_info.user_id, ", subscription_id=", json_ops.params[1])
-                    end
-                    
                     req_ctx.id_map[internal_id_str] = req_id
                     table.insert(req_ctx.internal_ids, internal_id_str)
                     json_ops.id = internal_id
@@ -1305,12 +1324,6 @@ function _M.access(conf, ctx)
             local bytes, send_err = wc:send_text(data_to_send)
             if not bytes then
                 core.log.error("ws-jsonrpc-proxy: send to upstream failed: ", send_err)
-                break
-            end
-        elseif typ == "binary" then
-            local bytes, send_err = wc:send_binary(data)
-            if not bytes then
-                core.log.error("ws-jsonrpc-proxy: send binary failed: ", send_err)
                 break
             end
         end

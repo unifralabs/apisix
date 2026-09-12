@@ -6,6 +6,7 @@
 -- - seconds_quota: CU limit per second
 -- - monthly_quota: Monthly CU limit
 -- - quota_key: Shared quota key (user_id) for multiple API keys per user
+-- - rpc_tier: Explicit method entitlement (free or paid) on a Consumer
 --
 -- Example Consumer config:
 -- {
@@ -31,6 +32,13 @@ local plugin_name = "unifra-ctx-var"
 local schema = {
     type = "object",
     description = "Key-value pairs for variables to inject into ctx.var",
+    properties = {
+        rpc_tier = {
+            type = "string",
+            enum = { "free", "paid" },
+            description = "Consumer method entitlement, independent of CU quota"
+        }
+    },
     additionalProperties = {
         type = "string"
     }

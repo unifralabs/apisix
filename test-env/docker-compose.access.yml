@@ -1,0 +1,38 @@
+# Isolated method-authorization regression stack. No production connections.
+# docker compose -p unifra-access-test -f test-env/docker-compose.access.yml up -d
+services:
+  etcd:
+    image: registry.k8s.io/etcd:3.5.16-0
+    command:
+      - /usr/local/bin/etcd
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd:2379
+    networks: [access-test]
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly no --save ""
+    networks: [access-test]
+  mock-rpc:
+    image: python:3.12-alpine
+    command: python -u /tests/access_mock.py
+    volumes:
+      - ./access_mock.py:/tests/access_mock.py:ro
+    networks: [access-test]
+  apisix:
+    image: apache/apisix:3.14.0-debian
+    depends_on: [etcd, redis, mock-rpc]
+    volumes:
+      - ..:/opt/unifra-apisix:ro
+      - ./apisix-access-config.yaml:/usr/local/apisix/conf/config.yaml:ro
+    networks: [access-test]
+  tests:
+    image: python:3.12-alpine
+    profiles: [test]
+    command: python -B /tests/test_access.py --config-dir /configs
+    volumes:
+      - .:/tests:ro
+      - ../../nomad-config/apisix-config:/configs:ro
+    networks: [access-test]
+networks:
+  access-test:
+    internal: true

@@ -1,0 +1,36 @@
+apisix:
+  node_listen: 9080
+  enable_ipv6: false
+  extra_lua_path: /opt/unifra-apisix/?.lua
+deployment:
+  role: traditional
+  role_traditional:
+    config_provider: etcd
+  etcd:
+    host: ["http://etcd:2379"]
+    prefix: /apisix-access-test
+  admin:
+    admin_key:
+      - name: admin
+        key: unifra-access-test-only
+        role: admin
+    allow_admin: [0.0.0.0/0]
+nginx_config:
+  worker_processes: 1
+  error_log_level: warn
+plugins:
+  - prometheus
+  - key-auth
+  - cors
+  - limit-req
+  - proxy-rewrite
+  - response-rewrite
+  - redirect
+  - unifra-key-auth
+  - unifra-jsonrpc-var
+  - unifra-ctx-var
+  - unifra-whitelist
+  - unifra-calculate-cu
+  - unifra-limit-cu
+  - unifra-limit-monthly-cu
+  - unifra-ws-jsonrpc-proxy

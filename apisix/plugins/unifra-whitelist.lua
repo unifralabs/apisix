@@ -11,6 +11,7 @@
 local core = require("apisix.core")
 local jsonrpc = require("unifra.jsonrpc.core")
 local whitelist = require("unifra.jsonrpc.whitelist")
+local access = require("unifra.jsonrpc.access")
 
 local plugin_name = "unifra-whitelist"
 
@@ -28,11 +29,6 @@ local schema = {
             minimum = 0,
             description = "Config cache TTL in seconds (0 = no caching)"
         },
-        paid_quota_threshold = {
-            type = "integer",
-            default = 1000000,
-            description = "Monthly quota threshold to be considered paid user"
-        },
         bypass_networks = {
             type = "array",
             items = { type = "string" },
@@ -41,6 +37,10 @@ local schema = {
         },
     },
 }
+
+for name, field in pairs(access.schema_properties) do
+    schema.properties[name] = field
+end
 
 local _M = {
     version = 0.1,
@@ -55,25 +55,14 @@ function _M.check_schema(conf)
 end
 
 
---- Check if network should bypass whitelist
-local function should_bypass(network, bypass_list)
-    if not network or not bypass_list then
-        return false
-    end
-
-    for _, pattern in ipairs(bypass_list) do
-        if network:find(pattern, 1, true) then
-            return true
-        end
-    end
-
-    return false
-end
-
-
 function _M.access(conf, ctx)
     -- Skip if not a JSON-RPC request (no parsed data)
     if not ctx.jsonrpc then
+        if conf.method_policy == "free_only" and ctx.var.request_method == "POST" then
+            core.response.set_header("Content-Type", "application/json")
+            return 400, jsonrpc.error_response(jsonrpc.ERROR_INVALID_REQUEST,
+                "JSON-RPC request was not parsed", nil)
+        end
         return
     end
 
@@ -94,21 +83,22 @@ function _M.access(conf, ctx)
     local methods = ctx.var.jsonrpc_methods
 
     -- Check bypass networks
-    if should_bypass(network, conf.bypass_networks) then
+    if access.should_bypass(conf, network) then
         core.log.info("whitelist bypass for network: ", network)
         return
     end
 
     -- Determine if user is paid tier
-    local monthly_quota = tonumber(ctx.var.monthly_quota) or 0
-    local is_paid = monthly_quota > conf.paid_quota_threshold
+    local is_paid, entitlement_source = access.is_paid(conf, ctx)
+    ctx.var.rpc_entitlement_source = entitlement_source
 
     -- Check whitelist
     local ok, err = whitelist.check(network, methods, is_paid, config_cache)
     if not ok then
         core.log.warn("whitelist denied: ", err,
                       ", network=", network,
-                      ", is_paid=", is_paid)
+                      ", is_paid=", is_paid,
+                      ", entitlement_source=", entitlement_source)
 
         core.response.set_header("Content-Type", "application/json")
 

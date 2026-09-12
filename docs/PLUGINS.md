@@ -276,7 +276,16 @@ Controls which JSON-RPC methods are allowed for each network and user tier (free
     "paid_quota_threshold": {
       "type": "integer",
       "default": 1000000,
-      "description": "Monthly quota threshold to be considered paid user"
+      "description": "Legacy quota threshold, used only when rpc_tier is absent"
+    },
+    "method_policy": {
+      "type": "string",
+      "enum": ["free_only", "consumer"],
+      "default": "consumer"
+    },
+    "legacy_quota_fallback": {
+      "type": "boolean",
+      "default": true
     },
     "bypass_networks": {
       "type": "array",
@@ -330,15 +339,51 @@ networks:
 
 ### Free vs Paid Tier
 
-A user is considered "paid" if:
-```
-monthly_quota > paid_quota_threshold
+HTTP and WebSocket share `unifra/jsonrpc/access.lua`:
+
+- `method_policy: "free_only"`: only the network's `free` methods are allowed,
+  regardless of quota or Consumer entitlement. `bypass_networks` is ignored.
+  Use this on public Services/Routes, with `legacy_quota_fallback: false`.
+- `method_policy: "consumer"` (default): read `rpc_tier` from the authenticated
+  Consumer's `unifra-ctx-var` configuration. `"paid"` allows `free` and `paid`
+  methods; `"free"` allows only `free`. Headers, query parameters and variables
+  injected by Routes cannot grant this explicit entitlement.
+- If `rpc_tier` is missing, `legacy_quota_fallback: true` (migration default)
+  preserves the old `monthly_quota > paid_quota_threshold` rule for authenticated
+  Consumers. The default threshold is 1,000,000 CU. Set the fallback to `false`
+  after migrating Consumers; missing entitlements then receive free access.
+- Invalid/empty explicit tiers never fall back to quota. The `unifra-ctx-var`
+  schema rejects values other than `free` and `paid`.
+
+Consumer example (quota and method access are independent):
+
+```json
+{
+  "unifra-ctx-var": {
+    "rpc_tier": "free",
+    "monthly_quota": "1000000000"
+  }
+}
 ```
 
-Default threshold: 1,000,000 CU
+Keep endpoint method policies on Services/Routes. Consumer provisioning should
+write `rpc_tier`, not attach overriding `unifra-whitelist` or
+`unifra-ws-jsonrpc-proxy` configurations: APISIX gives Consumer plugin
+configurations precedence over Service/Route configurations.
 
-- **Free users**: Can only access methods in `free` list
-- **Paid users**: Can access both `free` and `paid` lists
+Public POST requests without successfully parsed JSON-RPC are rejected, including
+POST requests carrying a WebSocket Upgrade header. CORS OPTIONS is unaffected.
+WebSocket text and binary messages both pass JSON-RPC authorization; accepted
+binary JSON is normalized to a text frame upstream. Batches are rejected in full
+if any method is disallowed. `rpc_entitlement_source` records the decision source
+in the request context for logging (including `legacy_quota` during migration).
+
+Deploy the updated plugins on every gateway before applying configurations with
+new fields. Enable `free_only` on public services, populate `rpc_tier` from actual
+plan entitlements in all Consumer provisioning/update paths, then turn off legacy
+fallback on private HTTP and WS services. Existing WS connections retain their
+handshake Consumer snapshot; reconnect them when immediate entitlement changes
+are required. A rollback must retain the public method restriction.
 
 ### Wildcard Patterns
 
@@ -594,6 +639,11 @@ X-RateLimit-Reset: 1
 ### Purpose
 
 Proxies WebSocket connections with per-message JSON-RPC processing. Unlike HTTP where each request is independent, WebSocket maintains a persistent connection and this plugin intercepts each message for rate limiting and access control.
+
+`method_policy` and `legacy_quota_fallback` have the same schema, defaults and
+entitlement rules as `unifra-whitelist` above. Public WS endpoints must enable
+this proxy with `method_policy: "free_only"`; HTTP request-body authorization
+alone cannot protect messages sent after the WS handshake.
 
 ### Schema
 
