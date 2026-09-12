@@ -126,3 +126,8 @@ Verified locally on 2026-09-12 after removing client-type coupling:
 
 All checks passed against the isolated local mock stack. This is not a
 production load test or a guarantee of backend execution cancellation.
+
+The subsequent [real-node acceptance](REAL_NODE_E2E.md) added 156 successful
+HTTP/WS checks through local APISIX to actual Arc/DogeOS upstreams, including
+real subscription pushes and Redis billing. Multi-instance and large-scale
+load tests remain outside the requested scope.

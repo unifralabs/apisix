@@ -1,0 +1,7 @@
+# Explicit opt-in overlay: ONLY the local gateway can reach real RPC upstreams.
+# The Admin API and Redis stay on the internal test network; no host ports.
+services:
+  apisix:
+    networks: [access-test, node-egress]
+networks:
+  node-egress: {}
