@@ -18,6 +18,7 @@ logs/
 luac.out
 
 # Test artifacts
+/sub_output.txt
 test-env/.env
 test-env/etcd-data/
 test-env/redis-data/
