@@ -23,6 +23,8 @@ plugins:
   - key-auth
   - cors
   - limit-req
+  - limit-conn
+  - real-ip
   - proxy-rewrite
   - response-rewrite
   - redirect

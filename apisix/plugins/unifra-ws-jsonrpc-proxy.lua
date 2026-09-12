@@ -563,11 +563,27 @@ end
 
 
 function _M.access(conf, ctx)
-    -- Case-insensitive WebSocket upgrade check
-    -- Handles "Websocket", "WebSocket", "WEBSOCKET", etc. properly
+    -- This plugin owns a WS-only endpoint. Never fall through to the normal
+    -- HTTP proxy: WS services do not run the HTTP whitelist/CU limit plugins.
+    -- Validate the handshake before opening an upstream connection or billing.
     local upgrade = ctx.var.http_upgrade
-    if not upgrade or upgrade:lower() ~= "websocket" then
-        return
+    local connection = ctx.var.http_connection or ""
+    local connection_upgrade = false
+    for token in connection:lower():gmatch("[^,]+") do
+        if token:match("^%s*(.-)%s*$") == "upgrade" then
+            connection_upgrade = true
+            break
+        end
+    end
+    local key = ctx.var.http_sec_websocket_key
+    local decoded_key = key and ngx.decode_base64(key)
+    if ctx.var.request_method ~= "GET"
+        or not upgrade or upgrade:lower() ~= "websocket"
+        or not connection_upgrade
+        or ctx.var.http_sec_websocket_version ~= "13"
+        or not decoded_key or #decoded_key ~= 16
+    then
+        return errors.response(ctx, errors.ERR_BAD_REQUEST, "WebSocket handshake required")
     end
 
     core.log.info("ws-jsonrpc-proxy: intercepting WebSocket for ", ctx.var.host)

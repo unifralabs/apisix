@@ -628,6 +628,23 @@ X-RateLimit-Reset: 1
 
 Proxies WebSocket connections with per-message JSON-RPC processing. Unlike HTTP where each request is independent, WebSocket maintains a persistent connection and this plugin intercepts each message for rate limiting and access control.
 
+This plugin is **WS-only**: ordinary HTTP requests must not fall through to the
+upstream, because WS services may not include the HTTP whitelist/CU plugins.
+Before connecting upstream it requires GET, `Upgrade: websocket`, an `Upgrade`
+token in `Connection` (case-insensitive), WebSocket version 13, and a base64
+16-byte handshake nonce. Invalid handshakes return HTTP 400 with
+`WebSocket handshake required`. Authentication or CORS plugins may respond
+earlier. Do not attach this plugin to a mixed HTTP/WS endpoint expecting HTTP
+fallthrough; configure a separate HTTP route with the complete HTTP checks.
+
+Arc and DogeOS testnet paid debug access is restricted to
+`debug_traceTransaction`, `debug_traceCall`, `debug_traceBlockByHash`, and
+`debug_traceBlockByNumber`. Arc's trace namespace is also explicitly enumerated
+in `conf/whitelist.yaml`. Node administration and unknown debug/trace methods
+are not included, even for paid Consumers. Free `eth_*`/`net_*`/`web3_*`
+patterns and other networks are unchanged. See
+[local security regression](../test-env/WS_SECURITY.md).
+
 `method_policy` has the same schema, default and entitlement rules as
 `unifra-whitelist` above. Public WS endpoints must enable
 this proxy with `method_policy: "free_only"`; HTTP request-body authorization

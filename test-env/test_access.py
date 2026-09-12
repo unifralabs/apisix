@@ -94,12 +94,14 @@ def http_case(path="/", host="arc-testnet-public.unifra.io", payload=None,
 
 
 class WebSocket:
-    def __init__(self, path, key=None):
+    def __init__(self, path, key=None, host="access.test", upgrade="websocket",
+                 connection="Upgrade"):
         self.sock = socket.create_connection(("apisix", 9080), timeout=10)
         self.stream = self.sock.makefile("rb")
-        ws_key = base64.b64encode(b"access-test-12345").decode()
-        headers = (f"GET {path} HTTP/1.1\r\nHost: access.test\r\n"
-                   "Upgrade: websocket\r\nConnection: Upgrade\r\n"
+        # RFC 6455 requires a base64-encoded 16-byte nonce.
+        ws_key = base64.b64encode(b"access-test-1234").decode()
+        headers = (f"GET {path} HTTP/1.1\r\nHost: {host}\r\n"
+                   f"Upgrade: {upgrade}\r\nConnection: {connection}\r\n"
                    f"Sec-WebSocket-Key: {ws_key}\r\nSec-WebSocket-Version: 13\r\n")
         if key:
             headers += f"apikey: {key}\r\n"

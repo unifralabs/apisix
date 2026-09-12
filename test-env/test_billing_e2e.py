@@ -159,8 +159,8 @@ def pricing_case(transport):
         for method, cost in [("eth_blockNumber", 1), ("eth_getBalance", 2),
              ("eth_getBlockByNumber", 3), ("eth_call", 5), ("eth_getLogs", 10),
              ("debug_traceTransaction", 30), ("debug_traceBlockByNumber", 50),
-             ("debug_custom", 20), ("trace_block", 50), ("trace_transaction", 25),
-             ("trace_custom", 20), ("eth_custom", 1)]:
+             ("debug_traceCall", 30), ("trace_block", 50), ("trace_transaction", 25),
+             ("trace_get", 20), ("eth_custom", 1)]:
             checked(account, ws.call if ws else account.http, rpc(method), cost, 1)
     finally:
         if ws: ws.close()
