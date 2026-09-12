@@ -55,7 +55,22 @@ def test(name, fn):
 
 
 def rpc(method="eth_blockNumber", rpc_id=1):
-    return {"jsonrpc": "2.0", "method": method, "params": [], "id": rpc_id}
+    tx = {"to": "0x" + "00" * 19 + "01", "gas": "0x186a0"}
+    zero = "0x" + "00" * 32
+    params = {
+        "eth_call": [tx, "latest"], "eth_estimateGas": [tx, "latest"],
+        "eth_createAccessList": [tx, "latest"],
+        "eth_getLogs": [{"fromBlock": "0x1", "toBlock": "0x1", "address": tx["to"]}],
+        "debug_traceTransaction": [zero], "debug_traceBlockByHash": [zero],
+        "debug_traceBlockByNumber": ["latest"], "debug_traceCall": [tx, "latest"],
+        "trace_call": [tx, ["trace"], "latest"], "trace_callMany": [[[tx, ["trace"]]], "latest"],
+        "trace_rawTransaction": ["0x01", ["trace"]], "trace_block": ["latest"],
+        "trace_transaction": [zero], "trace_get": [zero, []],
+        "trace_replayTransaction": [zero, ["trace"]],
+        "trace_replayBlockTransactions": ["latest", ["trace"]],
+        "trace_filter": [{"fromBlock": "0x1", "toBlock": "0x1", "count": 1}],
+    }.get(method, [])
+    return {"jsonrpc": "2.0", "method": method, "params": params, "id": rpc_id}
 
 
 def count():
@@ -107,7 +122,10 @@ class WebSocket:
             headers += f"apikey: {key}\r\n"
         self.sock.sendall((headers + "\r\n").encode())
         status = self.stream.readline()
-        assert b" 101 " in status, status
+        if b" 101 " not in status:
+            self.stream.close()
+            self.sock.close()
+            raise AssertionError(status)
         while self.stream.readline() not in (b"\r\n", b""):
             pass
 
@@ -327,8 +345,13 @@ def main():
             "redis_host": "redis", "whitelist_config_path": "/missing-whitelist.yaml"})
         time.sleep(1)
         try:
-            ws_case(error_code=-32603, forwarded=0,
-                    error_message="Service temporarily unavailable")
+            before = count()
+            try:
+                WebSocket("/ws-public")
+                raise RuntimeError("missing policy config unexpectedly upgraded")
+            except AssertionError as exc:
+                assert b"503" in exc.args[0], exc
+            assert count() == before
         finally:
             admin("plugin_metadata/unifra-ws-jsonrpc-proxy", {"redis_host": "redis"})
     test("WS missing whitelist fails closed", missing_ws_config)

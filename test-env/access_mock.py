@@ -6,6 +6,7 @@ import json
 import struct
 import threading
 import uuid
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
@@ -55,6 +56,8 @@ class Handler(BaseHTTPRequestHandler):
     calls = []
     lock = threading.Lock()
     subscriptions = {}
+    filters = {}
+    requests = []
 
     def setup(self):
         super().setup()
@@ -70,11 +73,29 @@ class Handler(BaseHTTPRequestHandler):
         requests = request if batch else [request]
         with self.lock:
             self.calls.extend(r.get("method") for r in requests if isinstance(r, dict))
+            self.requests.extend(requests)
         replies = []
         for r in requests:
             if not isinstance(r, dict) or "id" not in r:
                 continue
             response = {"jsonrpc": "2.0", "id": r["id"], "result": "mock:" + r["method"]}
+            first = r.get("params", [None])[0] if r.get("params") else None
+            if isinstance(first, dict):
+                time.sleep(min(3, first.get("mock_delay", 0)))
+                if first.get("mock_size"):
+                    response["result"] = "x" * min(2200000, first["mock_size"])
+            if r["method"] in ("eth_newFilter", "eth_newBlockFilter", "eth_newPendingTransactionFilter"):
+                filter_id = "0x" + uuid.uuid4().hex
+                self.filters[filter_id] = True
+                response["result"] = filter_id
+            elif r["method"] in ("eth_getFilterChanges", "eth_getFilterLogs", "eth_uninstallFilter"):
+                if first not in self.filters:
+                    response.pop("result")
+                    response["error"] = {"code": -32602, "message": "filter not found"}
+                elif r["method"] == "eth_uninstallFilter":
+                    response["result"] = self.filters.pop(first)
+                else:
+                    response["result"] = []
             if r["method"].endswith("_subscribe"):
                 subscription = "0x" + uuid.uuid4().hex
                 with self.lock:
@@ -113,6 +134,10 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
+        if self.path == "/requests":
+            with self.lock:
+                self.reply(json.dumps(self.requests).encode())
+            return
         if self.path == "/calls":
             with self.lock:
                 self.reply(json.dumps(self.calls).encode())

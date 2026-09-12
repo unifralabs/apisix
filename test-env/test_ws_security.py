@@ -145,7 +145,7 @@ def main():
         ]:
             t.test(network + " invalid handshake " + method + str(headers), lambda: http_on_ws(
                 network, keys["free-high"], method=method, headers=headers))
-        paid_methods = DEBUG + (TRACE if network == "arc-testnet" else [])
+        paid_methods = DEBUG + TRACE
         for method in DEBUG + TRACE + DENIED:
             for name in ("free-high", "paid-low"):
                 allowed = name == "paid-low" and method in paid_methods

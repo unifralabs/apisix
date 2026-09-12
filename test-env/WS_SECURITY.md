@@ -1,5 +1,9 @@
 # Arc / DogeOS WS security regression
 
+The findings and 434-test table below describe the original isolated security
+patch d3751986. Subsequent configuration-selected RPC policy adds DogeOS trace
+permissions and explicit free-method/parameter limits; see [RPC_POLICY.md](RPC_POLICY.md).
+
 ## Scope and findings (2026-09-12, local only)
 
 No production requests, Admin API writes, node management calls, or deployment.

@@ -31,6 +31,7 @@ local function process_whitelist_config(parsed)
             config.networks[network] = {
                 free = methods.free or {},
                 paid = methods.paid or {},
+                rpc_policy = methods.rpc_policy,
                 -- Build lookup tables
                 free_lookup = {},
                 paid_lookup = {}

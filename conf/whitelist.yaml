@@ -412,24 +412,63 @@ networks:
       - debug_*
 
   dogeos-testnet:
+    rpc_policy: bounded_evm
+    # Explicit names; parameter/transport limits live in rpc_policy.lua.
     free:
-      - web3_*
-      - net_*
-      - eth_*
+      - web3_clientVersion
+      - web3_sha3
+      - net_version
+      - net_listening
+      - net_peerCount
+      - eth_chainId
+      - eth_blockNumber
+      - eth_protocolVersion
+      - eth_syncing
+      - eth_gasPrice
+      - eth_maxPriorityFeePerGas
+      - eth_feeHistory
+      - eth_getBalance
+      - eth_getStorageAt
+      - eth_getCode
+      - eth_getTransactionCount
+      - eth_getAccount
+      - eth_getAccountInfo
+      - eth_getBlockByHash
+      - eth_getBlockByNumber
+      - eth_getHeaderByHash
+      - eth_getHeaderByNumber
+      - eth_getBlockTransactionCountByHash
+      - eth_getBlockTransactionCountByNumber
+      - eth_getTransactionByHash
+      - eth_getTransactionByBlockHashAndIndex
+      - eth_getTransactionByBlockNumberAndIndex
+      - eth_getTransactionReceipt
+      - eth_getRawTransactionByHash
+      - eth_getRawTransactionByBlockHashAndIndex
+      - eth_getRawTransactionByBlockNumberAndIndex
+      - eth_getUncleCountByBlockHash
+      - eth_getUncleCountByBlockNumber
+      - eth_getUncleByBlockHashAndIndex
+      - eth_getUncleByBlockNumberAndIndex
+      - eth_call
+      - eth_estimateGas
+      - eth_createAccessList
+      - eth_getLogs
+      - eth_getBlockReceipts
+      - eth_sendRawTransaction
+      - eth_subscribe
+      - eth_unsubscribe
+      - eth_newFilter
+      - eth_newBlockFilter
+      - eth_getFilterChanges
+      - eth_getFilterLogs
+      - eth_uninstallFilter
     paid:
-      # Public tracing API only; never expose node administration via debug_*.
       - debug_traceTransaction
       - debug_traceCall
       - debug_traceBlockByHash
       - debug_traceBlockByNumber
-
-  arc-testnet:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
-    paid:
-      # Explicit tracing allowlist: unknown/new methods remain denied.
+      - debug_traceCallMany
       - trace_block
       - trace_transaction
       - trace_call
@@ -439,10 +478,95 @@ networks:
       - trace_replayTransaction
       - trace_filter
       - trace_get
+      - eth_getProof
+      - eth_callMany
+      - eth_simulateV1
+      - eth_getStorageValues
+      - eth_newPendingTransactionFilter
+      - debug_getRawHeader
+      - debug_getRawBlock
+      - debug_getRawTransaction
+      - debug_getRawTransactions
+      - debug_getRawReceipts
+
+  arc-testnet:
+    rpc_policy: bounded_evm
+    # Explicit names; parameter/transport limits live in rpc_policy.lua.
+    free:
+      - web3_clientVersion
+      - web3_sha3
+      - net_version
+      - net_listening
+      - net_peerCount
+      - eth_chainId
+      - eth_blockNumber
+      - eth_protocolVersion
+      - eth_syncing
+      - eth_gasPrice
+      - eth_maxPriorityFeePerGas
+      - eth_feeHistory
+      - eth_getBalance
+      - eth_getStorageAt
+      - eth_getCode
+      - eth_getTransactionCount
+      - eth_getAccount
+      - eth_getAccountInfo
+      - eth_getBlockByHash
+      - eth_getBlockByNumber
+      - eth_getHeaderByHash
+      - eth_getHeaderByNumber
+      - eth_getBlockTransactionCountByHash
+      - eth_getBlockTransactionCountByNumber
+      - eth_getTransactionByHash
+      - eth_getTransactionByBlockHashAndIndex
+      - eth_getTransactionByBlockNumberAndIndex
+      - eth_getTransactionReceipt
+      - eth_getRawTransactionByHash
+      - eth_getRawTransactionByBlockHashAndIndex
+      - eth_getRawTransactionByBlockNumberAndIndex
+      - eth_getUncleCountByBlockHash
+      - eth_getUncleCountByBlockNumber
+      - eth_getUncleByBlockHashAndIndex
+      - eth_getUncleByBlockNumberAndIndex
+      - eth_call
+      - eth_estimateGas
+      - eth_createAccessList
+      - eth_getLogs
+      - eth_getBlockReceipts
+      - eth_sendRawTransaction
+      - eth_subscribe
+      - eth_unsubscribe
+      - eth_newFilter
+      - eth_newBlockFilter
+      - eth_getFilterChanges
+      - eth_getFilterLogs
+      - eth_uninstallFilter
+      - eth_blobBaseFee
+    paid:
       - debug_traceTransaction
       - debug_traceCall
       - debug_traceBlockByHash
       - debug_traceBlockByNumber
+      - debug_traceCallMany
+      - trace_block
+      - trace_transaction
+      - trace_call
+      - trace_callMany
+      - trace_rawTransaction
+      - trace_replayBlockTransactions
+      - trace_replayTransaction
+      - trace_filter
+      - trace_get
+      - eth_getProof
+      - eth_callMany
+      - eth_simulateV1
+      - eth_getStorageValues
+      - eth_newPendingTransactionFilter
+      - debug_getRawHeader
+      - debug_getRawBlock
+      - debug_getRawTransaction
+      - debug_getRawTransactions
+      - debug_getRawReceipts
 
   op-mainnet:
     free:

@@ -160,7 +160,7 @@ def pricing_case(transport):
              ("eth_getBlockByNumber", 3), ("eth_call", 5), ("eth_getLogs", 10),
              ("debug_traceTransaction", 30), ("debug_traceBlockByNumber", 50),
              ("debug_traceCall", 30), ("trace_block", 50), ("trace_transaction", 25),
-             ("trace_get", 20), ("eth_custom", 1)]:
+             ("trace_get", 25), ("eth_chainId", 1)]:
             checked(account, ws.call if ws else account.http, rpc(method), cost, 1)
     finally:
         if ws: ws.close()
@@ -184,11 +184,13 @@ def encoding_case():
             gzip.compress(json.dumps(p).encode())), rpc("eth_call"), 5, 1)
     checked(account, lambda p: account.http(p, {"Content-Type": "text/plain"}), rpc(), 1, 1)
     before = account.used()
-    result = account.http({"jsonrpc": "2.0", "method": "eth_call", "params": []})
+    notification = rpc("eth_call")
+    notification.pop("id")
+    result = account.http(notification)
     assert result is None and account.used() == before + 5, (result, account.used())
     checked(account, account.http, [rpc(), {"jsonrpc": "2.0", "method": "eth_getBalance"}], 3, 2)
     before = account.used()
-    account.http([{"jsonrpc": "2.0", "method": "eth_call"}, {"jsonrpc": "2.0", "method": "eth_call"}])
+    account.http([notification, notification])
     assert account.used() == before + 10
 
 
@@ -199,7 +201,9 @@ def ws_encoding_case():
         checked(account, lambda p: ws.call(p, binary=True), rpc("eth_call"), 5, 1)
         checked(account, lambda p: ws.call(p, fragmented=True), rpc("eth_getBalance"), 2, 1)
         checked(account, lambda p: ws.call(p, binary=True), rpc("debug_traceTransaction"), 0, 0, -32003)
-        ws.sock.sendall(frame(json.dumps({"jsonrpc": "2.0", "method": "eth_call"}).encode(), masked=True))
+        notification = rpc("eth_call")
+        notification.pop("id")
+        ws.sock.sendall(frame(json.dumps(notification).encode(), masked=True))
         success(ws.call(rpc()))
         assert account.used() == 13, account.used()
         result = checked(account, ws.call, [rpc(rpc_id="original"),
@@ -243,7 +247,7 @@ def sharing_case(limit):
 
 
 def concurrency_case(transport):
-    account = Account(monthly=3)
+    account = Account("paid", monthly=3)
     before = count()
     def invoke(_):
         if transport == "http": return account.http(rpc())
@@ -260,6 +264,7 @@ def concurrency_case(transport):
 def subscribe(ws, event, rpc_id=1):
     payload = rpc("eth_subscribe", rpc_id)
     payload["params"] = [event]
+    if event == "logs": payload["params"].append({"address": "0x" + "00" * 19 + "01"})
     result = ws.call(payload)
     success(result)
     return result["result"]
@@ -299,11 +304,11 @@ def pushes_case(tier, event, cost, binary=False):
 
 
 def batch_subscriptions():
-    account = Account()
+    account = Account("paid")
     ws = account.ws()
     try:
         payload = [rpc("eth_subscribe", "logs-id"), rpc("eth_subscribe", "pending-id")]
-        payload[0]["params"] = ["logs"]
+        payload[0]["params"] = ["logs", {"address": "0x" + "00" * 19 + "01"}]
         payload[1]["params"] = ["newPendingTransactions"]
         result = checked(account, ws.call, payload, 2, 2)
         assert [r["id"] for r in result] == ["logs-id", "pending-id"], result
@@ -401,7 +406,7 @@ def main():
     for limit in ("seconds", "monthly"):
         run("shared HTTP/WS/two API keys/" + limit, lambda l=limit: sharing_case(l))
     for tier in ("free", "paid"):
-        for event,cost in (("newHeads",5),("logs",10),("newPendingTransactions",20),("syncing",5)):
+        for event,cost in (("newHeads",5),("logs",10)) + ((("newPendingTransactions",20),) if tier == "paid" else ()):
             run(f"{tier}/push/{event}/monthly only", lambda t=tier,e=event,c=cost: pushes_case(t,e,c))
         run(tier + "/push/monthly exhaustion closes", lambda t=tier: push_monthly_case(t))
         run(tier + "/binary push/monthly only", lambda t=tier: pushes_case(t, "logs", 10, True))

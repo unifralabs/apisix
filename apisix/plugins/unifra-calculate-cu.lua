@@ -9,6 +9,8 @@
 
 local core = require("apisix.core")
 local cu = require("unifra.jsonrpc.cu")
+local rpc_policy = require("unifra.jsonrpc.rpc_policy")
+local errors = require("unifra.jsonrpc.errors")
 
 local plugin_name = "unifra-calculate-cu"
 
@@ -53,7 +55,11 @@ function _M.access(conf, ctx)
     -- Pass TTL directly (not via set_ttl) to avoid cross-route interference
     local config_cache, err = cu.load_config(ctx, conf.config_path, conf.config_ttl)
     if err then
-        core.log.error("failed to load CU config: ", err, ", using defaults")
+        if ctx.jsonrpc.rpc_policy then
+            core.log.error("failed to load CU config: ", err, ", denying policy-controlled request")
+            return errors.response(ctx, errors.ERR_SERVICE_UNAVAILABLE)
+        end
+        core.log.error("failed to load CU config: ", err, ", using legacy fallback pricing")
     end
     if not config_cache then
         ctx.var.cu = 1
@@ -75,6 +81,11 @@ function _M.access(conf, ctx)
     for _, method in ipairs(methods) do
         local cost = cu.get_method_cu(method, config_cache)
         table.insert(costs, cost)
+    end
+    if ctx.jsonrpc.rpc_policy then
+        total_cu, costs = rpc_policy.costs(ctx.jsonrpc, config_cache, cu)
+        if not total_cu then return errors.response(ctx, errors.ERR_SERVICE_UNAVAILABLE) end
+        ctx.var.cu = total_cu
     end
     
     local cjson = require("cjson.safe")

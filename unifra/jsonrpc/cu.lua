@@ -80,7 +80,8 @@ local function process_cu_config(parsed)
     return {
         default = value_or_default(parsed.default, 1),
         push_notification = push_notif_result,
-        methods = parsed.methods or {}
+        methods = parsed.methods or {},
+        policy_methods = parsed.policy_methods,
     }
 end
 
@@ -99,7 +100,7 @@ function _M.load_config(ctx, path, ttl, force_reload)
     local raw_config, err = config_mod.load_cu_pricing(ctx, path, ttl, force_reload)
 
     if not raw_config then
-        ngx.log(ngx.WARN, "CU pricing config load failed: ", err or "unknown", ", using defaults")
+        ngx.log(ngx.WARN, "CU pricing config load failed: ", err or "unknown")
         return clone_default_config(), err
     end
 

@@ -9,6 +9,36 @@
 # Default CU cost for unlisted methods
 default: 1
 
+# Overrides used only by networks opting into the bounded_evm RPC policy.
+# The profile describes RPC semantics, not a backend client implementation.
+# Batch methods are multiplied by validated INTERNAL work, not just RPC count.
+policy_methods:
+  eth_getAccount: 5
+  eth_getAccountInfo: 3
+  eth_getHeaderByHash: 3
+  eth_getHeaderByNumber: 3
+  eth_getRawTransactionByHash: 3
+  eth_getRawTransactionByBlockHashAndIndex: 3
+  eth_getRawTransactionByBlockNumberAndIndex: 3
+  eth_blobBaseFee: 1
+  net_peerCount: 1
+  eth_createAccessList: 10
+  eth_getProof: 20
+  eth_getStorageValues: 2
+  eth_callMany: 10
+  eth_simulateV1: 10 # 50 CU minimum per simulation request
+  eth_subscribe: 1
+  eth_unsubscribe: 1
+  debug_traceCallMany: 30
+  trace_callMany: 30
+  trace_get: 25
+  trace_filter: 50 # per scanned block, maximum 10 blocks
+  debug_getRawHeader: 3
+  debug_getRawBlock: 10
+  debug_getRawTransaction: 3
+  debug_getRawTransactions: 10
+  debug_getRawReceipts: 10
+
 # ================================
 # WebSocket Push Notification CU Costs
 # ================================

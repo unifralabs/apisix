@@ -1,0 +1,9 @@
+# Local mock regression only: names intentionally unrelated to production chains.
+networks:
+  policy-enabled-demo:
+    rpc_policy: bounded_evm
+    free: [eth_call, eth_createAccessList]
+    paid: []
+  policy-disabled-demo:
+    free: [eth_call, eth_createAccessList]
+    paid: []

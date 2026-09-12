@@ -637,12 +637,13 @@ token in `Connection` (case-insensitive), WebSocket version 13, and a base64
 earlier. Do not attach this plugin to a mixed HTTP/WS endpoint expecting HTTP
 fallthrough; configure a separate HTTP route with the complete HTTP checks.
 
-Arc and DogeOS testnet paid debug access is restricted to
-`debug_traceTransaction`, `debug_traceCall`, `debug_traceBlockByHash`, and
-`debug_traceBlockByNumber`. Arc's trace namespace is also explicitly enumerated
-in `conf/whitelist.yaml`. Node administration and unknown debug/trace methods
-are not included, even for paid Consumers. Free `eth_*`/`net_*`/`web3_*`
-patterns and other networks are unchanged. See
+RPC parameter, transport and resource policy is selected by
+`rpc_policy: bounded_evm` in the network whitelist configuration, not by backend
+client type or hardcoded network names. Arc and DogeOS testnet currently opt in:
+both have explicit free/paid method lists, shared tracing permissions, bounded
+batch execution and policy-specific CU pricing. Node administration and unknown
+methods remain denied even for paid Consumers. Other networks are unchanged.
+See [policy and rollout boundaries](../test-env/RPC_POLICY.md) and
 [local security regression](../test-env/WS_SECURITY.md).
 
 `method_policy` has the same schema, default and entitlement rules as

@@ -19,6 +19,8 @@ local upstream_mod = require("apisix.upstream")
 local jsonrpc = require("unifra.jsonrpc.core")
 local whitelist_mod = require("unifra.jsonrpc.whitelist")
 local access = require("unifra.jsonrpc.access")
+local rpc_policy = require("unifra.jsonrpc.rpc_policy")
+local resources = require("unifra.jsonrpc.rpc_resources")
 local cu_mod = require("unifra.jsonrpc.cu")
 local redis_scripts = require("unifra.jsonrpc.redis_scripts")
 local redis_circuit_breaker = require("unifra.jsonrpc.redis_circuit_breaker")
@@ -253,6 +255,28 @@ local function check_message(conf, ctx, data, meta_conf)
             code = jsonrpc.ERROR_FORBIDDEN
         end
         return 405, jsonrpc.error_response(code, wl_err, result.ids and result.ids[1]), result, total_cu, cu_costs_str
+    end
+
+    local profile, profile_err = rpc_policy.resolve(whitelist_config, network)
+    if profile_err then
+        core.log.error("invalid RPC policy configuration: ", profile_err)
+        return 503, jsonrpc.error_response(-32603, "Service temporarily unavailable",
+            result.ids and result.ids[1]), result
+    end
+    local valid, policy_err, policy_code = rpc_policy.validate(result, network, is_paid,
+        conf.method_policy == "free_only" or not ctx.consumer, "ws", ctx, profile)
+    if valid and result.rpc_policy then
+        total_cu, costs_arr = rpc_policy.costs(result, cu_config, cu_mod)
+        if not total_cu then
+            valid, policy_err, policy_code = nil, "Service temporarily unavailable", -32603
+        else
+            cu_costs_str = require("cjson.safe").encode(costs_arr)
+        end
+    end
+    if valid then valid, policy_err, policy_code = resources.acquire(result, ctx) end
+    if not valid then
+        return policy_code == -32000 and 429 or policy_code == -32603 and 503 or 400,
+            jsonrpc.error_response(policy_code, policy_err, result.ids and result.ids[1]), result
     end
 
     -- Rate limit check (per-second sliding window, same as HTTP path)
@@ -612,6 +636,20 @@ function _M.access(conf, ctx)
     local event_topic = conf.kafka_event_topic
     local event_bp = get_batch_processor(meta_conf, conf, event_topic)
 
+    local ws_paid = access.is_paid(conf, ctx)
+    local ws_whitelist, ws_config_err = whitelist_mod.load_config(ctx, meta_conf.whitelist_config_path)
+    local ws_profile, ws_profile_err = rpc_policy.resolve(ws_whitelist, network)
+    if ws_config_err or ws_profile_err then
+        core.log.error("WS RPC policy configuration unavailable: ", ws_config_err or ws_profile_err)
+        return errors.response(ctx, errors.ERR_SERVICE_UNAVAILABLE)
+    end
+    local admitted, admission_err = resources.ws_open(ws_profile, ctx, ws_paid,
+        conf.method_policy == "free_only" or not ctx.consumer)
+    if not admitted then
+        return errors.response(ctx, admission_err == "limit" and errors.ERR_RATE_LIMITED
+            or errors.ERR_SERVICE_UNAVAILABLE)
+    end
+
     -- Redis configuration for billing/concurrency
     local redis_host = meta_conf.redis_host
     local redis_port = meta_conf.redis_port
@@ -728,6 +766,7 @@ function _M.access(conf, ctx)
     if up_conf and up_conf.timeout and up_conf.timeout.read then
         ws_timeout = up_conf.timeout.read * 1000
     end
+    if ctx.rpc_ws_lease then ws_timeout = math.min(ws_timeout or 60000, 60000) end
 
     -- Build upstream URL
     local upstream_scheme = ctx.upstream_scheme
@@ -746,7 +785,7 @@ function _M.access(conf, ctx)
     -- Create upstream client
     local wc, wc_err = ws_client:new({
         timeout = ws_timeout,
-        max_payload_len = 65535
+        max_payload_len = ctx.rpc_ws_lease and resources.response_limit or 65535
     })
 
     if not wc then
@@ -780,7 +819,7 @@ function _M.access(conf, ctx)
     -- Accept client connection
     local wb, wb_err = ws_server:new({
         timeout = ws_timeout,
-        max_payload_len = 65535
+        max_payload_len = ctx.rpc_ws_lease and 1048576 or 65535
     })
 
     if not wb then
@@ -820,6 +859,8 @@ function _M.access(conf, ctx)
     -- Used to correlate eth_subscribe response with the subscription type
     local pending_subscriptions = {}
     local pending_unsubscriptions = {}
+    ctx.rpc_subscriptions = subscription_map
+    ctx.rpc_pending_subscriptions = pending_subscriptions
 
     local function track_subscription_request(id, request)
         if type(request.method) ~= "string" or type(request.params) ~= "table" then
@@ -893,6 +934,7 @@ function _M.access(conf, ctx)
         local rx_frag_buf = {}
 
         while true do
+            if ctx.rpc_ws_deadline and ngx.now() >= ctx.rpc_ws_deadline then break end
             local data, typ, err = wc:recv_frame()
             if not data then
                 if err ~= "timeout" then
@@ -904,6 +946,13 @@ function _M.access(conf, ctx)
 
             -- Handle fragmented frames
             if typ ~= "ping" and typ ~= "pong" and typ ~= "close" then
+                if ctx.rpc_ws_lease then
+                    ctx.rpc_rx_size = (ctx.rpc_rx_size or 0) + #data
+                    if ctx.rpc_rx_size > resources.response_limit then
+                        wb:send_close(1009, "response exceeds policy limit")
+                        break
+                    end
+                end
                 if err == "again" then
                     if not rx_frag_type then
                         rx_frag_type = typ
@@ -917,6 +966,7 @@ function _M.access(conf, ctx)
                     rx_frag_buf = {}
                     rx_frag_type = nil
                 end
+                if ctx.rpc_ws_lease then ctx.rpc_rx_size = 0 end
             end
 
             if typ == "text" or typ == "binary" then
@@ -990,6 +1040,10 @@ function _M.access(conf, ctx)
                         -- Process Kafka log ONLY ONCE for the entire batch context
                         if not req_ctx.processed then
                             req_ctx.processed = true
+                            if req_ctx.policy_result and req_ctx.policy_result.rpc_policy then
+                                req_ctx.policy_result.rpc_policy.completed = true
+                            end
+                            resources.finish(req_ctx.policy_result, ctx)
                             log_jsonrpc(ctx, conf, base_info, {
                                 request_data = req_ctx.data,
                                 response_data = data,
@@ -1166,6 +1220,10 @@ function _M.access(conf, ctx)
     local tx_frag_buf = {}
 
     while true do
+        if ctx.rpc_ws_deadline and ngx.now() >= ctx.rpc_ws_deadline then
+            wb:send_close(1000, "connection lifetime exceeded; reconnect")
+            break
+        end
         local data, typ, err = wb:recv_frame()
         cleanup_inflight(ngx.now(), wb)
 
@@ -1179,6 +1237,13 @@ function _M.access(conf, ctx)
 
         -- Handle fragmented frames
         if typ ~= "ping" and typ ~= "pong" and typ ~= "close" then
+            if ctx.rpc_ws_lease then
+                ctx.rpc_tx_size = (ctx.rpc_tx_size or 0) + #data
+                if ctx.rpc_tx_size > 1048576 then
+                    wb:send_close(1009, "request exceeds policy limit")
+                    break
+                end
+            end
             if err == "again" then
                 if not tx_frag_type then
                     tx_frag_type = typ
@@ -1192,6 +1257,7 @@ function _M.access(conf, ctx)
                 tx_frag_buf = {}
                 tx_frag_type = nil
             end
+            if ctx.rpc_ws_lease then ctx.rpc_tx_size = 0 end
         end
 
         if typ == "close" then
@@ -1210,6 +1276,7 @@ function _M.access(conf, ctx)
             local subscription_request = is_subscription_request(parsed)
 
             if status ~= 200 then
+                resources.finish(parsed, ctx)
                 -- Log rejected request immediately
                 local method_name = nil
                 local req_id = nil
@@ -1278,10 +1345,11 @@ function _M.access(conf, ctx)
             end
             
             -- Prepare data to send (default to original)
-            local data_to_send = data
+            local data_to_send = parsed and parsed.rpc_policy and cjson.encode(parsed.raw) or data
 
             if has_ids then
                 local req_ctx = {
+                    policy_result = parsed,
                     start_time = ngx.now(),
                     orig_id = req_id,       -- Keep for single request backward compatibility
                     data = data,            -- Keep original Request Data for logging
@@ -1352,6 +1420,7 @@ function _M.access(conf, ctx)
             end
 
             -- Forward (rewritten or original) to upstream
+            if parsed and parsed.rpc_policy then parsed.rpc_policy.sent = true end
             local bytes, send_err = wc:send_text(data_to_send)
             if not bytes then
                 core.log.error("ws-jsonrpc-proxy: send to upstream failed: ", send_err)
@@ -1389,5 +1458,9 @@ function _M.access(conf, ctx)
     return
 end
 
+function _M.log(conf, ctx)
+    resources.release(ctx.rpc_ws_lease)
+    for result in pairs(ctx.rpc_inflight or {}) do resources.finish(result, ctx) end
+end
 
 return _M
