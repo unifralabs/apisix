@@ -1,24 +1,14 @@
 -- Shared method entitlement resolution for HTTP and WebSocket requests.
 local _M = {}
 
--- These fields are shared by both plugin schemas. Legacy fallback is enabled
--- during Consumer migration only; public endpoints always use free_only.
+-- These fields are shared by both plugin schemas. Method access is determined
+-- only by endpoint policy and the authenticated Consumer's explicit rpc_tier.
 _M.schema_properties = {
     method_policy = {
         type = "string",
         enum = { "free_only", "consumer" },
         default = "consumer",
         description = "free_only caps endpoint permissions; consumer uses rpc_tier"
-    },
-    legacy_quota_fallback = {
-        type = "boolean",
-        default = true,
-        description = "Use monthly quota only when an authenticated Consumer has no rpc_tier"
-    },
-    paid_quota_threshold = {
-        type = "integer",
-        default = 1000000,
-        description = "Legacy monthly quota threshold; ignored with explicit rpc_tier or free_only"
     },
 }
 
@@ -41,12 +31,7 @@ function _M.is_paid(conf, ctx)
         return tier == "paid", tier == "paid" and "rpc_tier_paid" or "rpc_tier_free"
     end
 
-    if conf.legacy_quota_fallback == false then
-        return false, "missing_rpc_tier"
-    end
-
-    local quota = tonumber(ctx.var.monthly_quota) or 0
-    return quota > (conf.paid_quota_threshold or 1000000), "legacy_quota"
+    return false, "missing_rpc_tier"
 end
 
 function _M.should_bypass(conf, network)

@@ -32,7 +32,7 @@ production and staging public service policies are checked. Redis metadata is
 created locally; production metadata and credentials are never imported.
 
 Additional local fixtures cover authenticated Consumers, high public/free quotas,
-low paid quotas, legacy and strict migration modes, bypass attempts, spoofed
+low paid quotas, missing explicit tiers, bypass attempts, spoofed
 headers/route variables, unknown networks/methods, missing whitelist files, CORS,
 HTTP gzip/batches/notifications, POST Upgrade bypass, WS text/binary/fragmented
 messages and repeated messages over one WS connection. Each RPC assertion checks

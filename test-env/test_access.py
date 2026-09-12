@@ -176,7 +176,7 @@ def setup(config_dir):
         admin("plugin_metadata/" + plugin, {"redis_host": "redis", "redis_port": 6379})
 
     cases = {"free-high": ("free", 10**9), "paid-low": ("paid", 1000),
-             "legacy-high": (None, 10**9), "legacy-boundary": (None, 10**6),
+             "missing-high": (None, 10**9),
              "paid-exhausted": ("paid", 1)}
     keys = {}
     run_id = uuid.uuid4().hex[:8]
@@ -189,16 +189,15 @@ def setup(config_dir):
         admin("consumers/" + key, {"username": key, "plugins": {
             "key-auth": {"key": key}, "unifra-ctx-var": variables}})
 
-    for name, policy, auth, legacy, network, config_path in [
-        ("private", "consumer", True, True, "arc-testnet", None),
-        ("strict", "consumer", True, False, "arc-testnet", None),
-        ("public-auth", "free_only", True, True, "arc-testnet", None),
-        ("public-high", "free_only", False, True, "arc-testnet", None),
-        ("anonymous", "consumer", False, True, "arc-testnet", None),
-        ("unknown", "free_only", False, True, "unknown", None),
-        ("missing-config", "free_only", False, True, "arc-testnet", "/missing-whitelist.yaml"),
+    for name, policy, auth, network, config_path in [
+        ("private", "consumer", True, "arc-testnet", None),
+        ("public-auth", "free_only", True, "arc-testnet", None),
+        ("public-high", "free_only", False, "arc-testnet", None),
+        ("anonymous", "consumer", False, "arc-testnet", None),
+        ("unknown", "free_only", False, "unknown", None),
+        ("missing-config", "free_only", False, "arc-testnet", "/missing-whitelist.yaml"),
     ]:
-        whitelist = {"method_policy": policy, "legacy_quota_fallback": legacy}
+        whitelist = {"method_policy": policy}
         if policy == "free_only":
             whitelist["bypass_networks"] = [network]
         if config_path:
@@ -211,14 +210,13 @@ def setup(config_dir):
                             "unifra-limit-monthly-cu": {}})
         admin("routes/access-" + name, {"uri": "/" + name, "host": "access.test",
                                        "methods": ["POST"], "plugins": plugins, "upstream": UPSTREAM})
-    for name, policy, auth, legacy in [
-        ("public", "free_only", False, True),
-        ("public-auth", "free_only", True, True),
-        ("private", "consumer", True, True),
-        ("strict", "consumer", True, False),
+    for name, policy, auth in [
+        ("public", "free_only", False),
+        ("public-auth", "free_only", True),
+        ("private", "consumer", True),
     ]:
         config = {"network": "arc-testnet", "method_policy": policy,
-                  "legacy_quota_fallback": legacy, "enable_rate_limit": False}
+                  "enable_rate_limit": False}
         if policy == "free_only":
             config["bypass_networks"] = ["arc"]
         plugins = {"unifra-ws-jsonrpc-proxy": config,
@@ -272,12 +270,10 @@ def main():
     test("missing whitelist fails closed", lambda: http_case(path="/missing-config", host="access.test",
          error_code=-32603, status=503, forwarded=0,
          error_message="Service temporarily unavailable"))
-    for name in ("free-high", "legacy-boundary"):
+    for name in ("free-high", "missing-high"):
         test(name + " denies paid HTTP", lambda: http_case(path="/private", host="access.test", key=keys[name], **denied))
-    for name in ("paid-low", "legacy-high"):
-        test(name + " allows paid HTTP", lambda: http_case(path="/private", host="access.test", key=keys[name], payload=debug))
-    test("strict missing tier", lambda: http_case(path="/strict", host="access.test", key=keys["legacy-high"], **denied))
-    test("strict explicit paid", lambda: http_case(path="/strict", host="access.test", key=keys["paid-low"], payload=debug))
+    test("paid-low allows paid HTTP", lambda: http_case(path="/private", host="access.test",
+         key=keys["paid-low"], payload=debug))
     test("quota still independently enforced HTTP", lambda: http_case(path="/private", host="access.test",
          key=keys["paid-exhausted"], payload=debug, status=429, error_code=-32001, forwarded=0))
 
@@ -307,12 +303,10 @@ def main():
     test("WS public binary basic", lambda: ws_case(binary=True))
     test("WS public fragmented debug", lambda: ws_case(**ws_denied, fragmented=True))
     test("WS public authenticated paid", lambda: ws_case(path="/ws-public-auth", key=keys["paid-low"], **ws_denied))
-    for name in ("free-high", "legacy-boundary"):
+    for name in ("free-high", "missing-high"):
         test(name + " denies paid WS", lambda: ws_case(path="/ws-private", key=keys[name], **ws_denied))
-    for name in ("paid-low", "legacy-high"):
-        test(name + " allows paid WS", lambda: ws_case(path="/ws-private", key=keys[name], payload=debug))
-    test("WS strict missing tier", lambda: ws_case(path="/ws-strict", key=keys["legacy-high"], **ws_denied))
-    test("WS strict explicit paid", lambda: ws_case(path="/ws-strict", key=keys["paid-low"], payload=debug))
+    test("paid-low allows paid WS", lambda: ws_case(path="/ws-private",
+         key=keys["paid-low"], payload=debug))
     test("quota still independently enforced WS", lambda: ws_case(path="/ws-private", key=keys["paid-exhausted"],
          payload=debug, error_code=-32001, forwarded=0))
 

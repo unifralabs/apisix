@@ -348,10 +348,6 @@
         "$comment": "this is a mark for our injected plugin schema",
         "type": "object",
         "properties": {
-          "paid_quota_threshold": {
-            "type": "integer",
-            "default": 1000000
-          },
           "_meta": {
             "additionalProperties": false,
             "type": "object",
@@ -991,11 +987,6 @@
         "$comment": "this is a mark for our injected plugin schema",
         "type": "object",
         "properties": {
-          "paid_quota_threshold": {
-            "description": "Monthly quota threshold to be considered paid user",
-            "type": "integer",
-            "default": 1000000
-          },
           "config_ttl": {
             "description": "Config cache TTL in seconds (0 = no caching)",
             "minimum": 0,

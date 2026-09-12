@@ -106,13 +106,13 @@ def setup():
     admin("routes/billing-http", {"uri": "/billing-http", "host": "access.test",
         "methods": ["POST"], "upstream": UPSTREAM, "plugins": {
             "key-auth": {}, "unifra-jsonrpc-var": {"network": "arc-testnet"},
-            "unifra-whitelist": {"legacy_quota_fallback": False},
+            "unifra-whitelist": {},
             "unifra-calculate-cu": {}, "unifra-limit-cu": {"allow_degradation": False},
             "unifra-limit-monthly-cu": {}}})
     admin("routes/billing-ws", {"uri": "/billing-ws", "host": "access.test",
         "methods": ["GET"], "enable_websocket": True, "upstream": UPSTREAM,
         "plugins": {"key-auth": {}, "unifra-ws-jsonrpc-proxy": {
-            "network": "arc-testnet", "legacy_quota_fallback": False,
+            "network": "arc-testnet",
             "enable_rate_limit": True, "allow_degradation": False}}})
     time.sleep(1)
 
