@@ -1,0 +1,19 @@
+{
+  "log_format": {
+    "user_id": "$user_id",
+    "app_id": "$app_id",
+    "network": "$unifra_log_network",
+    "route_name": "$unifra_log_route_name",
+    "transport": "$unifra_log_transport",
+    "event_kind": "$unifra_log_event_kind",
+    "schema_version": "$unifra_log_schema_version",
+    "duration": "$request_time",
+    "request": "$request_body",
+    "response": "$resp_body",
+    "client_ip": "$remote_addr",
+    "response_status_code": "$status",
+    "time": "$msec",
+    "cu_costs": "$cu_costs",
+    "total_cu_cost": "$total_cu_cost"
+  }
+}

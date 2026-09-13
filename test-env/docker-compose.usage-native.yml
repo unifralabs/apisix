@@ -1,0 +1,36 @@
+# Local-only production-version Kafka. No host ports and no production credentials.
+# Uses the existing isolated development network so usage-clickhouse can reach it.
+services:
+  usage-zookeeper:
+    image: bitnamilegacy/kafka:3.2.0-debian-11-r20@sha256:e087f4d1f199e871e0ad94fbdbc97c90d2c130e14f86f6559bd5ebe4c04423c9
+    platform: linux/amd64
+    entrypoint: ["/opt/bitnami/kafka/bin/zookeeper-server-start.sh"]
+    command: ["/tmp/usage-zookeeper.properties"]
+    volumes:
+      - ./usage-native-zookeeper.properties:/tmp/usage-zookeeper.properties:ro
+    environment:
+      KAFKA_HEAP_OPTS: "-Xms128m -Xmx256m"
+    networks: [backend]
+  usage-kafka32:
+    image: bitnamilegacy/kafka:3.2.0-debian-11-r20@sha256:e087f4d1f199e871e0ad94fbdbc97c90d2c130e14f86f6559bd5ebe4c04423c9
+    platform: linux/amd64
+    environment:
+      KAFKA_ENABLE_KRAFT: "no"
+      KAFKA_CFG_ZOOKEEPER_CONNECT: usage-zookeeper:2181
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://usage-kafka32:9092
+      KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_CFG_LOG_RETENTION_HOURS: "168"
+      KAFKA_CFG_NUM_PARTITIONS: "1"
+      KAFKA_CFG_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx512m"
+    depends_on: [usage-zookeeper]
+    networks: [backend]
+networks:
+  backend:
+    external: true
+    name: unifra-dashboard-dev_backend

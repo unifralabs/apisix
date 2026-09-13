@@ -19,6 +19,7 @@ nginx_config:
   worker_processes: 1
   error_log_level: warn
 plugins:
+  - kafka-logger
   - prometheus
   - key-auth
   - cors

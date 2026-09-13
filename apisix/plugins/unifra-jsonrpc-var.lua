@@ -14,6 +14,7 @@
 local core = require("apisix.core")
 local jsonrpc = require("unifra.jsonrpc.core")
 local compression = require("unifra.compression")
+local telemetry = require("unifra.jsonrpc.telemetry")
 
 local plugin_name = "unifra-jsonrpc-var"
 
@@ -41,6 +42,7 @@ end
 
 
 function _M.rewrite(conf, ctx)
+    telemetry.http(ctx, conf.network)
     -- Extract network from config or host header FIRST
     -- This must happen before any early returns so that ALL requests
     -- (including WebSocket) have ctx.var.unifra_network set
@@ -150,5 +152,11 @@ function _M.rewrite(conf, ctx)
                   ", network=", network or "unknown")
 end
 
+
+-- Re-evaluate the routed name at log time, before the lower-priority logger.
+-- A failed/non-upgraded WS handshake is not a WS RPC message.
+function _M.log(conf, ctx)
+    telemetry.http(ctx, conf.network)
+end
 
 return _M

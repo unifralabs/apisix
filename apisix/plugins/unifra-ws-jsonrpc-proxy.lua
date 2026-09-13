@@ -534,6 +534,8 @@ local function get_batch_processor(meta_conf, conf, topic_override)
 end
 
 
+local telemetry = require("unifra.jsonrpc.telemetry")
+
 local function log_jsonrpc(ctx, conf, base_info, log_details, bp)
     if not bp then
         return
@@ -581,6 +583,7 @@ local function log_jsonrpc(ctx, conf, base_info, log_details, bp)
         log_entry.response = response_data
     end
 
+    telemetry.apply(log_entry, base_info.telemetry, log_details.event_kind)
     core.log.debug("ws: queuing jsonrpc log, user_id=", user_id)
     bp:push(log_entry)
 end
@@ -622,7 +625,9 @@ function _M.access(conf, ctx)
     local base_info = {
         user_id = ctx.user_id or ctx.var.user_id or ctx.quota_key or ctx.var.quota_key or ctx.consumer_name or ctx.var.consumer_name,
         app_id = ctx.app_id or ctx.var.app_id or ctx.consumer_name or ctx.var.consumer_name,
-        network = network
+        network = network,
+        telemetry = telemetry.snapshot(ctx, conf.network or ctx.var.unifra_log_network,
+                                       "ws", "rpc_request"),
     }
 
     -- Load plugin metadata once per connection (defaults are populated in-place)
@@ -1071,6 +1076,7 @@ function _M.access(conf, ctx)
                         -- Unmatched response (timeout? or unsolicited? or batch?)
                         -- If we didn't rewrite it (not found), pass through as is.
                         log_jsonrpc(ctx, conf, base_info, {
+                            event_kind = "diagnostic",
                             request_data = "",
                             response_data = data,
                             duration = 0,
@@ -1174,6 +1180,7 @@ function _M.access(conf, ctx)
                      end
 
                      log_jsonrpc(ctx, conf, base_info, {
+                        event_kind = is_notification and "subscription_push" or "diagnostic",
                         request_data = "",
                         response_data = data,
                         duration = 0,
