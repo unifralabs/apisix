@@ -15,6 +15,14 @@ telemetry.http(ctx, nil)
 assert(ctx.var.unifra_log_network == "") -- never guess from Host
 assert(ctx.var.unifra_log_transport == "http") -- handshake is not a message
 assert(ctx.var.unifra_log_event_kind == "diagnostic")
+ctx.var.route_name = "support-options"
+ctx.var.request_method = "OPTIONS"
+telemetry.http(ctx, "")
+assert(ctx.var.unifra_log_network == "") -- preflight has no blockchain network
+assert(ctx.var.unifra_log_route_name == "support-options")
+assert(ctx.var.unifra_log_transport == "http")
+assert(ctx.var.unifra_log_event_kind == "diagnostic")
+assert(ctx.var.unifra_log_schema_version == 2)
 local snapshot = telemetry.snapshot(ctx, "arc-testnet", "ws", "rpc_request")
 local entry = telemetry.apply({cu_cost = 5, user_id = "owner"}, snapshot, "subscription_push")
 assert(entry.transport == "ws" and entry.event_kind == "subscription_push")
