@@ -16,6 +16,7 @@ local core = require("apisix.core")
 local balancer = require("apisix.balancer")
 local plugin_mod = require("apisix.plugin")
 local upstream_mod = require("apisix.upstream")
+local ws_upstream = require("unifra.jsonrpc.ws_upstream")
 local jsonrpc = require("unifra.jsonrpc.core")
 local whitelist_mod = require("unifra.jsonrpc.whitelist")
 local access = require("unifra.jsonrpc.access")
@@ -776,16 +777,16 @@ function _M.access(conf, ctx)
     -- Build upstream URL
     local upstream_scheme = ctx.upstream_scheme
     local ws_scheme = "ws"
-    local use_ssl = false
     if upstream_scheme == "https" or upstream_scheme == "grpcs" then
         ws_scheme = "wss"
-        use_ssl = true
     end
 
     local upstream_uri = ctx.var.upstream_uri or ctx.var.uri
     local upstream_url = ws_scheme .. "://" .. server.host .. ":" .. server.port .. upstream_uri
 
-    core.log.info("ws-jsonrpc-proxy: connecting to ", upstream_url)
+    -- The URI can contain an upstream provider API key.
+    core.log.info("ws-jsonrpc-proxy: connecting to ", ws_scheme, "://", server.host,
+                  ":", server.port)
 
     -- Create upstream client
     local wc, wc_err = ws_client:new({
@@ -798,22 +799,16 @@ function _M.access(conf, ctx)
         return 502
     end
 
-    -- Connection options with SSL verification
-    local conn_opts = { timeout = ws_timeout }
-
-    if use_ssl then
-        -- Enable SSL verification for security
-        conn_opts.ssl_verify = true
-
-        -- Set SNI for proper SSL handshake
-        local sni = server.domain or server.host
-        if sni then
-            conn_opts.server_name = sni:match("^([^:]+)")
-        end
+    -- Apply APISIX Host policy explicitly: this client bypasses proxy_pass.
+    local conn_opts, opts_err = ws_upstream.options(ctx, server, ws_timeout)
+    if not conn_opts then
+        wc.sock:close()
+        core.log.error("ws-jsonrpc-proxy: ", opts_err)
+        return 502
     end
 
-    -- Connect to upstream first
-    local ok, err = wc:connect(upstream_url, conn_opts)
+    -- Verify the upstream upgrade before returning HTTP 101 to the client.
+    local ok, err = ws_upstream.connect(wc, upstream_url, conn_opts)
     if not ok then
         core.log.error("ws-jsonrpc-proxy: failed to connect: ", err)
         return 502

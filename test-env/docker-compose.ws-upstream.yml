@@ -1,0 +1,16 @@
+# Overlay docker-compose.access.yml; use a separate project for this suite.
+services:
+  mock-rpc:
+    command: python -B -u /tests/ws_upstream_mock.py
+    volumes:
+      - .:/tests:ro
+      - ${WS_TEST_CERT_DIR:?Generate test certificates first}:/certs:ro
+    networks:
+      access-test:
+        aliases: [provider.test, rewrite.test]
+  apisix:
+    volumes:
+      - ./apisix-ws-upstream-config.yaml:/usr/local/apisix/conf/config.yaml:ro
+      - ${WS_TEST_CERT_DIR:?Generate test certificates first}:/certs:ro
+  tests:
+    command: python -B /tests/test_ws_upstream_e2e.py --config-dir /configs
