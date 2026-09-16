@@ -15,28 +15,33 @@ describe("Whitelist Access Control", function()
 
     setup(function()
         conftest.setup()
-        -- Build a proper whitelist config
-        config = {
+        local raw = {
+            schema_version = 1,
+            revision = "test-revision",
+            method_profiles = {
+                evm = {"eth_blockNumber", "eth_chainId", "eth_gasPrice", "eth_call", "eth_getBalance"},
+                debug = {"debug_traceTransaction", "debug_traceCall"},
+                trace = {"trace_block", "trace_transaction"},
+            },
             networks = {
                 ["eth-mainnet"] = {
-                    free = {"eth_blockNumber", "eth_chainId", "eth_gasPrice", "eth_call", "eth_getBalance"},
-                    paid = {"debug_*", "trace_*"},
-                    free_lookup = {},
-                    paid_lookup = {}
+                    display_name = "Ethereum Mainnet",
+                    published = true,
+                    free_profiles = {"evm"},
+                    paid_profiles = {"debug", "trace"},
                 },
                 ["polygon"] = {
-                    free = {"eth_*"},
-                    paid = {"debug_*"},
-                    free_lookup = {},
-                    paid_lookup = {}
+                    published = true,
+                    free_profiles = {"evm"},
+                    paid_profiles = {"debug"},
+                },
+                ["staging-internal"] = {
+                    published = false,
+                    free = {"eth_blockNumber"},
                 }
             }
         }
-        -- Build lookup tables
-        for network, nc in pairs(config.networks) do
-            for _, m in ipairs(nc.free) do nc.free_lookup[m] = true end
-            for _, m in ipairs(nc.paid) do nc.paid_lookup[m] = true end
-        end
+        config = assert(whitelist.process_config(raw))
     end)
 
     teardown(function()
@@ -62,7 +67,7 @@ describe("Whitelist Access Control", function()
         end)
 
         it("should reject if any method in batch requires paid", function()
-            local ok, err = whitelist.check("eth-mainnet", {"eth_blockNumber", "debug_trace"}, false, config)
+            local ok, err = whitelist.check("eth-mainnet", {"eth_blockNumber", "debug_traceCall"}, false, config)
             assert.is_false(ok)
             assert.is_truthy(err:match("requires paid tier"))
         end)
@@ -80,7 +85,7 @@ describe("Whitelist Access Control", function()
         end)
 
         it("should allow mixed methods for paid tier", function()
-            local ok, err = whitelist.check("eth-mainnet", {"eth_blockNumber", "debug_trace"}, true, config)
+            local ok, err = whitelist.check("eth-mainnet", {"eth_blockNumber", "debug_traceCall"}, true, config)
             assert.is_true(ok)
         end)
     end)
@@ -121,15 +126,45 @@ describe("Whitelist Access Control", function()
         end)
     end)
 
-    describe("wildcard matching", function()
-        it("should match eth_* pattern for polygon", function()
-            local ok, err = whitelist.check("polygon", {"eth_anyMethod"}, false, config)
+    describe("explicit method profiles", function()
+        it("should expand a reusable profile to exact names", function()
+            local ok = whitelist.check("polygon", {"eth_call"}, false, config)
             assert.is_true(ok)
         end)
 
-        it("should match debug_* for paid polygon user", function()
-            local ok, err = whitelist.check("polygon", {"debug_trace"}, true, config)
-            assert.is_true(ok)
+        it("should reject unknown names even when their prefix is familiar", function()
+            local ok, err = whitelist.check("polygon", {"eth_anyMethod"}, false, config)
+            assert.is_false(ok)
+            assert.is_truthy(err:match("unsupported method"))
+        end)
+
+        it("should reject wildcard entries while loading configuration", function()
+            local parsed, err = whitelist.process_config({
+                networks = {bad = {free = {"eth_*"}, paid = {}}},
+            })
+            assert.is_nil(parsed)
+            assert.is_truthy(err:match("wildcard methods are not allowed"))
+        end)
+
+        it("should reject unknown profiles", function()
+            local parsed, err = whitelist.process_config({
+                networks = {bad = {free_profiles = {"missing"}}},
+            })
+            assert.is_nil(parsed)
+            assert.is_truthy(err:match("unknown method profile"))
+        end)
+    end)
+
+    describe("public capabilities", function()
+        it("should expose sorted sanitized published networks", function()
+            local capabilities = whitelist.get_capabilities(config)
+            assert.equals(1, capabilities.schema_version)
+            assert.equals("test-revision", capabilities.revision)
+            assert.equals(2, #capabilities.networks)
+            assert.equals("eth-mainnet", capabilities.networks[1].id)
+            assert.equals("Ethereum Mainnet", capabilities.networks[1].display_name)
+            assert.is_nil(capabilities.networks[1].free_lookup)
+            assert.equals("polygon", capabilities.networks[2].id)
         end)
     end)
 
@@ -147,10 +182,11 @@ describe("Whitelist Access Control", function()
     describe("get_networks", function()
         it("should return all networks", function()
             local networks = whitelist.get_networks(config)
-            assert.equals(2, #networks)
+            assert.equals(3, #networks)
             -- Should be sorted
             assert.equals("eth-mainnet", networks[1])
             assert.equals("polygon", networks[2])
+            assert.equals("staging-internal", networks[3])
         end)
     end)
 end)

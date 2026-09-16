@@ -163,7 +163,11 @@ end
 -- @return table|nil Whitelist configuration
 -- @return string|nil Error message
 function _M.load_whitelist(ctx, config_path, ttl, force_reload)
-    return _M.load(ctx, _M.TYPE_WHITELIST, config_path, ttl, force_reload)
+    local config, err = _M.load(ctx, _M.TYPE_WHITELIST, config_path, ttl, force_reload)
+    if not config then return nil, err end
+    local ok, validation_err = _M.validate_whitelist(config)
+    if not ok then return nil, validation_err end
+    return config, nil
 end
 
 
@@ -193,9 +197,28 @@ function _M.validate_whitelist(config)
         return false, "config.networks must be a table"
     end
 
+    if config.method_profiles ~= nil and type(config.method_profiles) ~= "table" then
+        return false, "config.method_profiles must be a table"
+    end
+
+    for profile, methods in pairs(config.method_profiles or {}) do
+        if type(methods) ~= "table" then
+            return false, "method profile must be an array: " .. profile
+        end
+        for _, method in ipairs(methods) do
+            if type(method) ~= "string" or method:find("*", 1, true) then
+                return false, "method profile entries must be exact names: " .. profile
+            end
+        end
+    end
+
     for network, rules in pairs(config.networks) do
         if type(rules) ~= "table" then
             return false, "network rules must be a table: " .. network
+        end
+
+        if rules.published ~= nil and type(rules.published) ~= "boolean" then
+            return false, "published must be a boolean: " .. network
         end
 
         -- Check for free and paid arrays
@@ -205,6 +228,23 @@ function _M.validate_whitelist(config)
 
         if rules.paid and type(rules.paid) ~= "table" then
             return false, "paid methods must be an array: " .. network
+        end
+
+        for _, tier in ipairs({"free", "paid"}) do
+            for _, method in ipairs(rules[tier] or {}) do
+                if type(method) ~= "string" or method:find("*", 1, true) then
+                    return false, tier .. " methods must be exact names: " .. network
+                end
+            end
+            local profile_field = tier .. "_profiles"
+            if rules[profile_field] ~= nil and type(rules[profile_field]) ~= "table" then
+                return false, profile_field .. " must be an array: " .. network
+            end
+            for _, profile in ipairs(rules[profile_field] or {}) do
+                if not config.method_profiles or type(config.method_profiles[profile]) ~= "table" then
+                    return false, "unknown method profile " .. tostring(profile) .. ": " .. network
+                end
+            end
         end
     end
 

@@ -59,8 +59,8 @@ _M.fixtures = {
     whitelist_config = {
         networks = {
             ["eth-mainnet"] = {
-                free = {"eth_blockNumber", "eth_chainId", "eth_gasPrice", "eth_call", "eth_*"},
-                paid = {"debug_*", "trace_*"},
+                free = {"eth_blockNumber", "eth_chainId", "eth_gasPrice", "eth_call"},
+                paid = {"debug_trace", "debug_traceTransaction", "trace_block", "trace_call"},
                 free_lookup = {},
                 paid_lookup = {}
             }

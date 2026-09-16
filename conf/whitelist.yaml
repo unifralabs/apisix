@@ -4,13 +4,235 @@
 # - free: Methods available to all users
 # - paid: Methods only available to paid tier users
 #
-# Wildcard patterns are supported (e.g., "eth_*" matches all eth_ prefixed methods)
+# Every effective permission resolves to an exact JSON-RPC method name.
+
+schema_version: 1
+revision: "2026-09-16.1"
+
+# Reusable authoring profiles. They are expanded to exact method names when the
+# gateway loads this file; wildcard permission matching is intentionally not
+# supported. Network-level free/paid entries may add explicit exceptions.
+method_profiles:
+  evm_web3:
+    - web3_clientVersion
+    - web3_sha3
+  evm_net:
+    - net_listening
+    - net_peerCount
+    - net_version
+  evm_eth:
+    - eth_blobBaseFee
+    - eth_blockNumber
+    - eth_call
+    - eth_callMany
+    - eth_cancelPrivateTransaction
+    - eth_chainId
+    - eth_createAccessList
+    - eth_estimateGas
+    - eth_feeHistory
+    - eth_gasPrice
+    - eth_getAccount
+    - eth_getAccountInfo
+    - eth_getBalance
+    - eth_getBlockByHash
+    - eth_getBlockByNumber
+    - eth_getBlockReceipts
+    - eth_getBlockTransactionCountByHash
+    - eth_getBlockTransactionCountByNumber
+    - eth_getCode
+    - eth_getFilterChanges
+    - eth_getFilterLogs
+    - eth_getHeaderByHash
+    - eth_getHeaderByNumber
+    - eth_getLogs
+    - eth_getProof
+    - eth_getRawTransactionByBlockHashAndIndex
+    - eth_getRawTransactionByBlockNumberAndIndex
+    - eth_getRawTransactionByHash
+    - eth_getStorageAt
+    - eth_getStorageValues
+    - eth_getTransactionByBlockHashAndIndex
+    - eth_getTransactionByBlockNumberAndIndex
+    - eth_getTransactionByHash
+    - eth_getTransactionCount
+    - eth_getTransactionReceipt
+    - eth_getUncleByBlockHashAndIndex
+    - eth_getUncleByBlockNumberAndIndex
+    - eth_getUncleCountByBlockHash
+    - eth_getUncleCountByBlockNumber
+    - eth_maxPriorityFeePerGas
+    - eth_newBlockFilter
+    - eth_newFilter
+    - eth_newPendingTransactionFilter
+    - eth_protocolVersion
+    - eth_sendPrivateTransaction
+    - eth_sendRawTransaction
+    - eth_simulateV1
+    - eth_subscribe
+    - eth_syncing
+    - eth_uninstallFilter
+    - eth_unsubscribe
+  evm_debug:
+    - debug_getRawBlock
+    - debug_getRawHeader
+    - debug_getRawReceipts
+    - debug_getRawTransaction
+    - debug_getRawTransactions
+    - debug_traceBlockByHash
+    - debug_traceBlockByNumber
+    - debug_traceCall
+    - debug_traceCallMany
+    - debug_traceTransaction
+  evm_trace:
+    - trace_block
+    - trace_call
+    - trace_callMany
+    - trace_filter
+    - trace_get
+    - trace_rawTransaction
+    - trace_replayBlockTransactions
+    - trace_replayTransaction
+    - trace_transaction
+  polygon_bor:
+    - bor_getAuthor
+    - bor_getCurrentProposer
+    - bor_getCurrentValidators
+    - bor_getRootHash
+    - bor_getSigners
+    - bor_getSignersAtHash
+    - bor_getSnapshot
+    - bor_getSnapshotAtHash
+  zksync:
+    - zks_L1BatchNumber
+    - zks_L1ChainId
+    - zks_estimateFee
+    - zks_estimateGasL1ToL2
+    - zks_getAllAccountBalances
+    - zks_getBlockDetails
+    - zks_getBridgeContracts
+    - zks_getBytecodeByHash
+    - zks_getConfirmedTokens
+    - zks_getL1BatchBlockRange
+    - zks_getL1BatchDetails
+    - zks_getL2ToL1LogProof
+    - zks_getMainContract
+    - zks_getRawBlockTransactions
+    - zks_getTestnetPaymaster
+    - zks_getTokenPrice
+    - zks_getTransactionDetails
+  cfx:
+    - cfx_call
+    - cfx_checkBalanceAgainstTransaction
+    - cfx_clientVersion
+    - cfx_epochNumber
+    - cfx_estimateGasAndCollateral
+    - cfx_gasPrice
+    - cfx_getAccount
+    - cfx_getAccountPendingInfo
+    - cfx_getAccountPendingTransactions
+    - cfx_getAccumulateInterestRate
+    - cfx_getAdmin
+    - cfx_getBalance
+    - cfx_getBestBlockHash
+    - cfx_getBlockByBlockNumber
+    - cfx_getBlockByEpochNumber
+    - cfx_getBlockByHash
+    - cfx_getBlockByHashWithPivotAssumption
+    - cfx_getBlockRewardInfo
+    - cfx_getBlocksByEpoch
+    - cfx_getCode
+    - cfx_getCollateralForStorage
+    - cfx_getConfirmationRiskByHash
+    - cfx_getDepositList
+    - cfx_getEpochReceipts
+    - cfx_getInterestRate
+    - cfx_getLogs
+    - cfx_getNextNonce
+    - cfx_getParamsFromVote
+    - cfx_getPoSEconomics
+    - cfx_getPoSRewardByEpoch
+    - cfx_getSkippedBlocksByEpoch
+    - cfx_getSponsorInfo
+    - cfx_getStakingBalance
+    - cfx_getStatus
+    - cfx_getStorageAt
+    - cfx_getStorageRoot
+    - cfx_getSupplyInfo
+    - cfx_getTransactionByHash
+    - cfx_getTransactionReceipt
+    - cfx_getVoteList
+    - cfx_maxPriorityFeePerGas
+    - cfx_sendRawTransaction
+    - cfx_subscribe
+    - cfx_unsubscribe
+  pos:
+    - pos_getAccount
+    - pos_getBlockByHash
+    - pos_getBlockByNumber
+    - pos_getCommittee
+    - pos_getRewardsByEpoch
+    - pos_getStatus
+    - pos_getTransactionByNumber
+  starknet:
+    - starknet_addDeclareTransaction
+    - starknet_addDeployTransaction
+    - starknet_addInvokeTransaction
+    - starknet_blockHashAndNumber
+    - starknet_blockNumber
+    - starknet_call
+    - starknet_chainId
+    - starknet_estimateFee
+    - starknet_getBlockTransactionCount
+    - starknet_getBlockWithTxHashes
+    - starknet_getBlockWithTxs
+    - starknet_getClass
+    - starknet_getClassAt
+    - starknet_getClassHashAt
+    - starknet_getEvents
+    - starknet_getNonce
+    - starknet_getStateUpdate
+    - starknet_getStorageAt
+    - starknet_getTransactionByBlockIdAndIndex
+    - starknet_getTransactionByHash
+    - starknet_getTransactionReceipt
+    - starknet_pendingTransactions
+    - starknet_syncing
+  ckb_get:
+    - get_block
+    - get_block_economic_state
+    - get_block_filter
+    - get_block_hash
+    - get_block_median_time
+    - get_blockchain_info
+    - get_cells
+    - get_cells_capacity
+    - get_consensus
+    - get_current_epoch
+    - get_deployments_info
+    - get_epoch_by_number
+    - get_fork_block
+    - get_header
+    - get_header_by_number
+    - get_indexer_tip
+    - get_peers
+    - get_raw_tx_pool
+    - get_tip_block_number
+    - get_tip_header
+    - get_transaction
+    - get_transaction_proof
+    - get_transactions
+  ckb_send:
+    - send_transaction
+  parlia:
+    - parlia_getSnapshot
+    - parlia_getValidators
 
 networks:
   # =====================
   # Ethereum Networks
   # =====================
   eth-mainnet:
+    published: true
     free:
       # Web3 methods
       - web3_clientVersion
@@ -56,27 +278,31 @@ networks:
       - eth_getFilterChanges
       - eth_getFilterLogs
       - eth_uninstallFilter
-    paid:
-      - trace_*
-      - debug_*
-
+    paid_profiles:
+      - evm_trace
+      - evm_debug
+    paid: []
   eth-sepolia:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
-    paid:
-      - trace_*
-      - debug_*
-
+    published: true
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+    free: []
+    paid_profiles:
+      - evm_trace
+      - evm_debug
+    paid: []
   # =====================
   # Polygon Networks
   # =====================
   polygon-mainnet:
+    published: true
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
     free:
-      - web3_*
-      - net_*
-      - eth_*
       - bor_getSnapshot
       - bor_getAuthor
       - bor_getSnapshotAtHash
@@ -85,85 +311,103 @@ networks:
       - bor_getCurrentProposer
       - bor_getCurrentValidators
       - bor_getRootHash
-    paid:
-      - trace_*
-      - debug_*
-
+    paid_profiles:
+      - evm_trace
+      - evm_debug
+    paid: []
   # =====================
   # Layer 2 Networks
   # =====================
   arb-mainnet:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
-    paid:
-      - debug_*
-
+    published: true
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+    free: []
+    paid_profiles:
+      - evm_debug
+    paid: []
   opt-mainnet:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
-    paid:
-      - debug_*
-
+    published: true
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+    free: []
+    paid_profiles:
+      - evm_debug
+    paid: []
   base-mainnet:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
-    paid:
-      - debug_*
-
+    published: true
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+    free: []
+    paid_profiles:
+      - evm_debug
+    paid: []
   base-testnet:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
-    paid:
-      - debug_*
-
+    published: true
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+    free: []
+    paid_profiles:
+      - evm_debug
+    paid: []
   scroll-mainnet:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
-    paid:
-      - debug_*
-
+    published: true
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+    free: []
+    paid_profiles:
+      - evm_debug
+    paid: []
   scroll-testnet:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
-    paid:
-      - debug_*
-
+    published: true
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+    free: []
+    paid_profiles:
+      - evm_debug
+    paid: []
   linea-mainnet:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
-    paid:
-      - debug_*
-
+    published: true
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+    free: []
+    paid_profiles:
+      - evm_debug
+    paid: []
   linea-testnet:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
-    paid:
-      - debug_*
-
+    published: true
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+    free: []
+    paid_profiles:
+      - evm_debug
+    paid: []
   # =====================
   # ZK Networks
   # =====================
   zksync-era-mainnet:
+    published: true
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
     free:
-      - web3_*
-      - net_*
-      - eth_*
       - zks_estimateFee
       - zks_estimateGasL1ToL2
       - zks_getAllAccountBalances
@@ -181,38 +425,45 @@ networks:
       - zks_getTransactionDetails
       - zks_L1BatchNumber
       - zks_L1ChainId
-    paid:
-      - debug_*
-
+    paid_profiles:
+      - evm_debug
+    paid: []
   zksync-era-testnet:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
-      - zks_*
-    paid:
-      - debug_*
-
+    published: true
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+      - zksync
+    free: []
+    paid_profiles:
+      - evm_debug
+    paid: []
   # =====================
   # Conflux Networks
   # =====================
   cfx-espace:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
-    paid:
-      - trace_*
-
+    published: true
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+    free: []
+    paid_profiles:
+      - evm_trace
+    paid: []
   cfx-espace-testnet:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
-    paid:
-      - trace_*
-
+    published: true
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+    free: []
+    paid_profiles:
+      - evm_trace
+    paid: []
   cfx-core:
+    published: true
     free:
       - cfx_getStatus
       - cfx_epochNumber
@@ -270,16 +521,19 @@ networks:
       - cfx_getEpochReceipts
 
   cfx-core-testnet:
-    free:
-      - cfx_*
-      - pos_*
-    paid:
-      - trace_*
-
+    published: true
+    free_profiles:
+      - cfx
+      - pos
+    free: []
+    paid_profiles:
+      - evm_trace
+    paid: []
   # =====================
   # Starknet
   # =====================
   starknet-mainnet:
+    published: true
     free:
       - starknet_getStateUpdate
       - starknet_getNonce
@@ -307,14 +561,17 @@ networks:
     paid: []
 
   starknet-testnet:
-    free:
-      - starknet_*
+    published: true
+    free_profiles:
+      - starknet
+    free: []
     paid: []
 
   # =====================
   # CKB (Nervos)
   # =====================
   ckb-mirana:
+    published: true
     free:
       # Chain methods
       - get_tip_header
@@ -363,55 +620,68 @@ networks:
   # Other Networks
   # =====================
   merlin-mainnet:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
+    published: true
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+    free: []
     paid: []
 
   merlin-testnet:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
+    published: true
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+    free: []
     paid: []
 
   sophon-mainnet:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
-      - zks_*
-    paid:
-      - debug_*
-
+    published: true
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+      - zksync
+    free: []
+    paid_profiles:
+      - evm_debug
+    paid: []
   sophon-testnet:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
-      - zks_*
-    paid:
-      - debug_*
-
+    published: true
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+      - zksync
+    free: []
+    paid_profiles:
+      - evm_debug
+    paid: []
   xlayer-mainnet:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
-      - bor_*
-    paid:
-      - trace_*
-
+    published: true
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+      - polygon_bor
+    free: []
+    paid_profiles:
+      - evm_trace
+    paid: []
   dogeos-mainnet:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
-    paid:
-      - debug_*
-
+    published: true
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+    free: []
+    paid_profiles:
+      - evm_debug
+    paid: []
   dogeos-testnet:
+    published: true
     rpc_policy: bounded_evm
     # Explicit names; parameter/transport limits live in rpc_policy.lua.
     free:
@@ -490,6 +760,7 @@ networks:
       - debug_getRawReceipts
 
   arc-mainnet:
+    published: true
     rpc_policy: bounded_evm
     # Explicit names; parameter/transport limits live in rpc_policy.lua.
     free:
@@ -569,6 +840,7 @@ networks:
       - debug_getRawReceipts
 
   arc-testnet:
+    published: true
     rpc_policy: bounded_evm
     # Explicit names; parameter/transport limits live in rpc_policy.lua.
     free:
@@ -648,28 +920,35 @@ networks:
       - debug_getRawReceipts
 
   op-mainnet:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
-    paid:
-      - debug_*
-
+    published: true
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+    free: []
+    paid_profiles:
+      - evm_debug
+    paid: []
   op-testnet:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
-    paid:
-      - debug_*
-
+    published: true
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+    free: []
+    paid_profiles:
+      - evm_debug
+    paid: []
   bsc-mainnet:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
+    published: true
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+    free: []
+    paid_profiles:
+      - evm_debug
     paid:
-      - debug_*
       - parlia_getValidators
       - parlia_getSnapshot
 
@@ -677,104 +956,130 @@ networks:
   # Staging Networks (mirror of production)
   # =====================
   staging-eth-mainnet:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
-    paid:
-      - trace_*
-      - debug_*
-
+    published: false
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+    free: []
+    paid_profiles:
+      - evm_trace
+      - evm_debug
+    paid: []
   staging-eth-sepolia:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
-    paid:
-      - trace_*
-
+    published: false
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+    free: []
+    paid_profiles:
+      - evm_trace
+    paid: []
   staging-polygon-mainnet:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
-      - bor_*
-    paid:
-      - trace_*
-
+    published: false
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+      - polygon_bor
+    free: []
+    paid_profiles:
+      - evm_trace
+    paid: []
   staging-arb-mainnet:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
-    paid:
-      - debug_*
-
+    published: false
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+    free: []
+    paid_profiles:
+      - evm_debug
+    paid: []
   staging-opt-mainnet:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
-    paid:
-      - debug_*
-
+    published: false
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+    free: []
+    paid_profiles:
+      - evm_debug
+    paid: []
   staging-base-mainnet:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
-    paid:
-      - debug_*
-
+    published: false
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+    free: []
+    paid_profiles:
+      - evm_debug
+    paid: []
   staging-scroll-mainnet:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
-    paid:
-      - debug_*
-
+    published: false
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+    free: []
+    paid_profiles:
+      - evm_debug
+    paid: []
   staging-linea-mainnet:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
-    paid:
-      - debug_*
-
+    published: false
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+    free: []
+    paid_profiles:
+      - evm_debug
+    paid: []
   staging-zksync-era-mainnet:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
-      - zks_*
-    paid:
-      - debug_*
-
+    published: false
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+      - zksync
+    free: []
+    paid_profiles:
+      - evm_debug
+    paid: []
   staging-cfx-espace:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
-    paid:
-      - trace_*
-
+    published: false
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+    free: []
+    paid_profiles:
+      - evm_trace
+    paid: []
   staging-cfx-core:
-    free:
-      - cfx_*
-      - pos_*
-    paid:
-      - trace_*
-
+    published: false
+    free_profiles:
+      - cfx
+      - pos
+    free: []
+    paid_profiles:
+      - evm_trace
+    paid: []
   staging-starknet-mainnet:
-    free:
-      - starknet_*
+    published: false
+    free_profiles:
+      - starknet
+    free: []
     paid: []
 
   staging-ckb-mirana:
+    published: false
+    free_profiles:
+      - ckb_get
+      - ckb_send
     free:
-      - get_*
-      - send_*
       - local_node_info
       - get_peers
       - sync_state
@@ -791,19 +1096,24 @@ networks:
     paid: []
 
   staging-dogeos-testnet:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
-    paid:
-      - debug_*
-
+    published: false
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+    free: []
+    paid_profiles:
+      - evm_debug
+    paid: []
   staging-bsc-mainnet:
-    free:
-      - web3_*
-      - net_*
-      - eth_*
+    published: false
+    free_profiles:
+      - evm_web3
+      - evm_net
+      - evm_eth
+    free: []
+    paid_profiles:
+      - evm_debug
     paid:
-      - debug_*
       - parlia_getValidators
       - parlia_getSnapshot

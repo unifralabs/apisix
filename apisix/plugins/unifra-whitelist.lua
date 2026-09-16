@@ -18,13 +18,15 @@ local resources = require("unifra.jsonrpc.rpc_resources")
 local cjson = require("cjson.safe")
 
 local plugin_name = "unifra-whitelist"
+local default_config_path = "/opt/unifra-apisix/conf/whitelist.yaml"
+local capabilities_uri = "/apisix/plugin/unifra-whitelist/capabilities"
 
 local schema = {
     type = "object",
     properties = {
         config_path = {
             type = "string",
-            default = "/opt/unifra-apisix/conf/whitelist.yaml",
+            default = default_config_path,
             description = "Path to whitelist configuration file"
         },
         config_ttl = {
@@ -56,6 +58,45 @@ local _M = {
 
 function _M.check_schema(conf)
     return core.schema.check(schema, conf)
+end
+
+
+local function capabilities_handler()
+    local ctx = ngx.ctx.api_ctx or {}
+    local path = os.getenv("UNIFRA_WHITELIST_PATH") or default_config_path
+    local config, err = whitelist.load_config(ctx, path, 60)
+    if err or not config then
+        core.log.error("failed to load RPC capabilities: ", err)
+        return core.response.exit(503, {
+            error = "RPC capabilities are temporarily unavailable",
+        })
+    end
+
+    local document = whitelist.get_capabilities(config)
+    if not document then
+        return core.response.exit(503, {
+            error = "RPC capabilities are temporarily unavailable",
+        })
+    end
+
+    core.response.set_header("Content-Type", "application/json")
+    core.response.set_header("Cache-Control", "public, max-age=60")
+    core.response.set_header("ETag", '"' .. document.revision .. '"')
+    return core.response.exit(200, document)
+end
+
+
+-- Registered as an APISIX public API. Expose it with a dedicated Route using
+-- the built-in public-api plugin; only published, sanitized network data is
+-- returned, never upstreams or plugin configuration.
+function _M.api()
+    return {
+        {
+            methods = {"GET"},
+            uri = capabilities_uri,
+            handler = capabilities_handler,
+        },
+    }
 end
 
 
