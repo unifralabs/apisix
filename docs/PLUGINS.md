@@ -292,41 +292,42 @@ Controls which JSON-RPC methods are allowed for each network and user tier (free
 
 **whitelist.yaml:**
 ```yaml
+schema_version: 1
+revision: "2026-09-16.1"
+
+method_profiles:
+  evm_core:
+    - web3_clientVersion
+    - net_version
+    - eth_blockNumber
+    - eth_call
+
 networks:
   eth-mainnet:
+    display_name: Ethereum Mainnet
+    published: true
+    free_profiles:
+      - evm_core
     free:
-      - eth_blockNumber
       - eth_chainId
       - eth_gasPrice
-      - eth_getBalance
-      - eth_getBlockByNumber
-      - eth_getBlockByHash
-      - eth_getTransactionByHash
-      - eth_getTransactionReceipt
-      - eth_call
-      - eth_estimateGas
-      - eth_sendRawTransaction
-      - eth_getLogs
-      - eth_getCode
-      - eth_getStorageAt
-      - eth_getTransactionCount
-      - net_version
-      - web3_clientVersion
     paid:
-      - debug_*
-      - trace_*
+      - debug_traceTransaction
+      - trace_transaction
       - eth_createAccessList
 
-  polygon-mainnet:
-    free:
-      - eth_*
-      - net_*
-      - web3_*
-    paid:
-      - debug_*
-      - trace_*
-      - bor_*
+  staging-eth-mainnet:
+    published: false
+    free_profiles:
+      - evm_core
+    free: []
+    paid: []
 ```
+
+Profiles reduce repeated authoring across EVM-compatible networks, but they are
+expanded to exact names when loaded. Wildcards are rejected and never grant
+method access. `published: false` keeps internal/staging networks out of the
+sanitized capability document without changing enforcement.
 
 ### Free vs Paid Tier
 
@@ -373,11 +374,29 @@ plan entitlements in all Consumer provisioning/update paths. Existing WS connect
 handshake Consumer snapshot; reconnect them when immediate entitlement changes
 are required. A rollback must retain the public method restriction.
 
-### Wildcard Patterns
+### Capability API
 
-Supports `*` suffix wildcards:
-- `eth_*` matches `eth_blockNumber`, `eth_call`, etc.
-- `debug_*` matches `debug_traceTransaction`, etc.
+The plugin registers `GET /apisix/plugin/unifra-whitelist/capabilities`. It
+returns `schema_version`, `revision`, and the sorted, expanded free/paid method
+lists for published networks. Lookup tables, upstreams, paths, and internal
+networks are omitted.
+
+Expose it on the data plane with one dedicated APISIX Route:
+
+```json
+{
+  "name": "rpc-capabilities",
+  "uri": "/apisix/plugin/unifra-whitelist/capabilities",
+  "methods": ["GET"],
+  "plugins": {
+    "public-api": {}
+  }
+}
+```
+
+The handler uses `/opt/unifra-apisix/conf/whitelist.yaml` by default. Set
+`UNIFRA_WHITELIST_PATH` if the active gateway configuration uses another path.
+The same route can be installed with `scripts/setup-rpc-capabilities-route.sh`.
 
 ### Error Responses
 

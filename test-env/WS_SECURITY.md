@@ -60,11 +60,10 @@ the old vulnerability and are not counted as post-fix regression passes.
   changes or Nomad route changes are needed for this fix. The security release
   excludes the separate telemetry work.
 
-The remaining free `eth_*`, `net_*`, `web3_*` patterns are unchanged. This is
-not an exhaustive allowlist/parameter-cost audit: for example node-held-account
-signing APIs under `eth_*`, newly added expensive methods, custom tracer
-parameters and resource caps still need separate review. Upstream support for
-each retained tracing method has not been verified against the live nodes.
+The later capability-catalog release replaced the remaining permission
+wildcards with reusable profiles that expand to exact names. This historical
+security test still focuses on WS handshake and tracing behavior; upstream
+support for each retained method must be reviewed when a profile changes.
 
 ## Run
 

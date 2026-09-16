@@ -6,8 +6,8 @@
 -- and provides methods to check access permissions.
 --
 
-local core_module = require("unifra.jsonrpc.core")
 local config_mod = require("unifra.jsonrpc.config")
+local cjson = require("cjson.safe")
 
 local _M = {
     version = "1.0.0"
@@ -24,23 +24,90 @@ local DEFAULT_CONFIG = {
 -- Builds lookup tables for fast access
 -- @param parsed table Raw parsed config
 -- @return table Processed configuration with lookup tables
+local function contains_wildcard(method)
+    return type(method) == "string" and method:find("*", 1, true) ~= nil
+end
+
+
+local function append_methods(target, seen, methods, source)
+    for _, method in ipairs(methods or {}) do
+        if type(method) ~= "string" or method == "" then
+            return nil, "invalid method in " .. source
+        end
+        if contains_wildcard(method) then
+            return nil, "wildcard methods are not allowed in " .. source .. ": " .. method
+        end
+        if not seen[method] then
+            target[#target + 1] = method
+            seen[method] = true
+        end
+    end
+    return true
+end
+
+
+local function expand_tier(parsed, network, methods, profile_names, tier)
+    local expanded, seen = {}, {}
+    local profiles = parsed.method_profiles or {}
+    for _, profile_name in ipairs(profile_names or {}) do
+        local profile = profiles[profile_name]
+        if type(profile) ~= "table" then
+            return nil, "unknown method profile " .. tostring(profile_name) ..
+                " for network " .. network
+        end
+        local ok, err = append_methods(expanded, seen, profile,
+            "profile " .. profile_name)
+        if not ok then return nil, err end
+    end
+    local ok, err = append_methods(expanded, seen, methods,
+        network .. "." .. tier)
+    if not ok then return nil, err end
+    table.sort(expanded)
+    return expanded
+end
+
+
+local function default_display_name(network)
+    local words = {}
+    for word in network:gmatch("[^-]+") do
+        words[#words + 1] = word:sub(1, 1):upper() .. word:sub(2)
+    end
+    return table.concat(words, " ")
+end
+
+
 local function process_whitelist_config(parsed)
-    local config = { networks = {} }
+    local config = {
+        schema_version = parsed.schema_version or 1,
+        revision = parsed.revision or "unversioned",
+        networks = {},
+    }
     if parsed.networks then
         for network, methods in pairs(parsed.networks) do
+            local free, free_err = expand_tier(parsed, network, methods.free,
+                methods.free_profiles, "free")
+            if not free then return nil, free_err end
+            local paid, paid_err = expand_tier(parsed, network, methods.paid,
+                methods.paid_profiles, "paid")
+            if not paid then return nil, paid_err end
+
             config.networks[network] = {
-                free = methods.free or {},
-                paid = methods.paid or {},
+                free = free,
+                paid = paid,
                 rpc_policy = methods.rpc_policy,
+                display_name = methods.display_name or default_display_name(network),
+                published = methods.published == true,
+                environment = methods.environment,
+                sort_order = methods.sort_order,
                 -- Build lookup tables
                 free_lookup = {},
                 paid_lookup = {}
             }
             -- Convert arrays to lookup tables
-            for _, m in ipairs(methods.free or {}) do
+            for _, m in ipairs(free) do
                 config.networks[network].free_lookup[m] = true
             end
-            for _, m in ipairs(methods.paid or {}) do
+            for _, m in ipairs(paid) do
                 config.networks[network].paid_lookup[m] = true
             end
         end
@@ -68,7 +135,13 @@ function _M.load_config(ctx, path, ttl, force_reload)
     end
 
     -- Process raw config into optimized structure with lookup tables
-    return process_whitelist_config(raw_config), nil
+    local config, process_err = process_whitelist_config(raw_config)
+    if not config then
+        ngx.log(ngx.ERR, "whitelist config validation failed: ", process_err)
+        return DEFAULT_CONFIG, process_err
+    end
+
+    return config, nil
 end
 
 
@@ -96,30 +169,12 @@ local function check_method_access(network, method, is_paid, config)
         return true, nil
     end
 
-    -- Check wildcard patterns in free list
-    for _, pattern in ipairs(net_config.free) do
-        if core_module.match_method(method, pattern) then
-            return true, nil
-        end
-    end
-
     -- Check paid methods (only for paid users)
     if net_config.paid_lookup[method] then
         if is_paid then
             return true, nil
         else
             return false, "method " .. method .. " requires paid tier"
-        end
-    end
-
-    -- Check wildcard patterns in paid list
-    for _, pattern in ipairs(net_config.paid) do
-        if core_module.match_method(method, pattern) then
-            if is_paid then
-                return true, nil
-            else
-                return false, "method " .. method .. " requires paid tier"
-            end
         end
     end
 
@@ -185,6 +240,41 @@ function _M.get_networks(config)
     table.sort(networks)
     return networks
 end
+
+
+--- Build the public, read-only capability document.
+-- Lookup tables and unpublished/internal networks are deliberately omitted.
+function _M.get_capabilities(config)
+    if not config or not config.networks then return nil end
+    local networks = {}
+    for id, network in pairs(config.networks) do
+        if network.published then
+            networks[#networks + 1] = {
+                id = id,
+                display_name = network.display_name,
+                environment = network.environment,
+                sort_order = network.sort_order,
+                rpc_policy = network.rpc_policy,
+                free = #network.free > 0 and network.free or cjson.empty_array,
+                paid = #network.paid > 0 and network.paid or cjson.empty_array,
+            }
+        end
+    end
+    table.sort(networks, function(a, b)
+        local ao, bo = a.sort_order or 1000, b.sort_order or 1000
+        if ao ~= bo then return ao < bo end
+        return a.id < b.id
+    end)
+    return {
+        schema_version = config.schema_version,
+        revision = config.revision,
+        networks = networks,
+    }
+end
+
+
+-- Exported for deterministic unit tests and configuration tooling.
+_M.process_config = process_whitelist_config
 
 
 return _M

@@ -29,6 +29,7 @@ plugins:
   - proxy-rewrite
   - response-rewrite
   - redirect
+  - public-api
   - unifra-key-auth
   - unifra-jsonrpc-var
   - unifra-ctx-var
