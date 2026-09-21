@@ -7,7 +7,7 @@
 # Every effective permission resolves to an exact JSON-RPC method name.
 
 schema_version: 1
-revision: "2026-09-16.1"
+revision: "2026-09-22.1"
 
 # Reusable authoring profiles. They are expanded to exact method names when the
 # gateway loads this file; wildcard permission matching is intentionally not
@@ -685,6 +685,7 @@ networks:
     rpc_policy: bounded_evm
     # Explicit names; parameter/transport limits live in rpc_policy.lua.
     free:
+      - rollupNode_status
       - web3_clientVersion
       - web3_sha3
       - net_version
@@ -734,6 +735,8 @@ networks:
       - eth_getFilterLogs
       - eth_uninstallFilter
     paid:
+      - rollupNode_getL1MessageByIndex
+      - rollupNode_getL1MessageByKey
       - debug_traceTransaction
       - debug_traceCall
       - debug_traceBlockByHash
